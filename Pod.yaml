@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fuyubo-mvsa-multi
+spec:
+  restartPolicy: Never
+  hostIPC: false
+  schedulerName: sense-rubber
+  imagePullSecrets:
+    - name: sensebee-wb
+  containers:
+    - name: fuyubo-multi-sent
+      image: registry.sensetime.com/fdc/sensebee-mmdetection:dinghaojie-master-patch-36032-0a1c9772
+        #registry.sensetime.com/fdc/sensebee-mmdetection:dev_fuyubo-e29c027d
+      env:
+          - name: USER
+            value: "900025459"        
+      securityContext:
+        runAsUser: 900025459
+        runAsGroup: 900025459
+        capabilities:
+          drop:
+          - CHOWN
+      resources:
+        limits:
+          nvidia.com/gpu-v100: "1"
+        requests:
+          nvidia.com/gpu-v100: "1"
+      volumeMounts:
+        - name: data-storage
+          mountPath: /datasets
+        - name: output-storage
+          mountPath: /output
+      #command: ["/bin/bash", "-c", "cd /output && export DETECTRON2_DATASETS=/datasets && bash run/train.sh detectron2/projects/UniDet/sparse_configs/Sparse-OID-q300.yaml 8"] #--eval-only MODEL.WEIGHTS run/oid_sigce.pth"] #/sensebee2/fuyubo1/UniDet/detectron2/projects/UniDet/sparse_configs/Sparse-COCO-q100.yaml
+      #command: ["/bin/bash", "-c", "cd /output && sh train-single.sh 1"] #--eval-only MODEL.WEIGHTS /output/Sparse-COCO-q100-eql-focal/model_final.pth"]
+      command: ["/bin/bash", "-c", "cd /output && sh run.sh 1"]
+      #command: ["/bin/bash", "-c", "cd /output && export DETECTRON2_DATASETS=/datasets && bash run/train.sh detectron2/projects/UniDet/sparse_configs/Sparse-O365-q100.yaml 8 --eval-only MODEL.WEIGHTS /lustre/sparse_rcnn/o365_focal.pth"]
+      #command: ["/bin/bash", "-c", "cd /output && export DETECTRON2_DATASETS=/datasets && bash run/train.sh detectron2/projects/UniDet/sparse_configs/Multi_Head-q100.yaml 8"]
+      args: []
+  volumes:
+    #&& [ -d data ] || ln -s /data data
+    # SH-132/162: /data/nfs
+    # BJ-101/103: /home/data/nfs
+    # SH-08: /mnt/lustre/sensebee
+    - name: data-storage
+      hostPath:
+        path: /mnt/lustre/sensebee/backup/fuyubo1/
+        #path: /mnt/10-5-109-198/sensebee/data/cityBigModel
+        #path: /mnt/10-5-109-212/sensebee/data/detection      #/mnt/10-5-109-198/sensebee/data 
+    - name: output-storage
+      hostPath:
+        path: /mnt/lustre/sensebee/backup/fuyubo1/multi_senti/CLMLF
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: NotIn
+            values: [sh-idc1-10-5-8-49]
+

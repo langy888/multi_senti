@@ -13,6 +13,7 @@ import math
 import matplotlib.pyplot as plt
 from pre_model import RobertaEncoder
 import copy
+#os.environ['TORCH_HOME'] = '../../pretrained_model/input/' #setting the environment variable
 
 
 class ModelParam:

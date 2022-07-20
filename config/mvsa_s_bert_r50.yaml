@@ -1,0 +1,17 @@
+gpu_num: 2
+lr: 2.0e-5
+fuse_lr: 2.0e-5
+image_output_type: all
+optim: adamw
+data_type: MVSA-single
+train_fuse_model_epoch: 20
+epoch : 30
+warmup_step_epoch: 2
+image_model: resnet-50
+text_model: bert-base
+fuse_type: att
+batch: 32
+acc_grad: 1
+tran_num_layers: 3
+image_num_layers: 2
+fixed_image_model: True

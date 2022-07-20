@@ -1,4 +1,4 @@
-
+export http_proxy=172.16.1.135:3128 && export https_proxy=172.16.1.135:3128
 lr=2e-5
 fuse_lr=2e-5
 image_output_type=all
@@ -14,7 +14,7 @@ acc_grad=1
 tran_num_layers=3
 image_num_layers=2
 
-python main.py -cuda -gpu_num $1 -epoch ${epoch} -num_workers 8 \
+python -m torch.distributed.launch --nproc_per_node=$1 --local_rank=0 main.py -cuda -gpu_num $1 -epoch ${epoch} -num_workers 0 \
         -add_note ${data_type}-${tran_num_layers}-${fuse_type}-${batch}-${image_num_layers}-${text_model} \
         -data_type ${data_type} -text_model ${text_model} -image_model resnet-50 \
         -batch_size ${batch} -acc_grad ${acc_grad} -fuse_type ${fuse_type} -image_output_type ${image_output_type} -fixed_image_model \
