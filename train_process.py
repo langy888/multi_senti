@@ -16,7 +16,26 @@ import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 from model import ModelParam
 # import tensorflow as tf
+import torch.distributed as dist
 
+
+def is_main_process() -> bool:
+    return dist.get_rank() == 0
+
+
+def synchronize():
+    """
+    Helper function to synchronize (barrier) among all processes when
+    using distributed training
+    """
+    if not dist.is_available():
+        return
+    if not dist.is_initialized():
+        return
+    world_size = dist.get_world_size()
+    if world_size == 1:
+        return
+    dist.barrier()
 
 def train_process(opt, train_loader, dev_loader, test_loader, cl_model, critertion, log_summary_writer:SummaryWriter=None, tokenizer=None, image_id_list=None):
     optimizer = None
@@ -46,6 +65,7 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
     last_F1 = 0
     last_Accuracy = 0
     for epoch in trange(opt.epoch, desc='Epoch:'):
+        train_loader.sampler.set_epoch(epoch)
         y_true = []
         y_pre = []
         run_loss = 0
@@ -57,9 +77,12 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
         if epoch >= opt.train_fuse_model_epoch:
             optimizer.param_groups[0]['lr'] = opt.lr
             optimizer.param_groups[1]['lr'] = opt.lr
+        if is_main_process():
+            train_loader_tqdm = tqdm(train_loader, desc='Train Iteration:')
+        else:
+            train_loader_tqdm = train_loader
 
-        train_loader_tqdm = tqdm(train_loader, desc='Train Iteration:')
-        epoch_step_num = epoch * train_loader_tqdm.total
+        epoch_step_num = epoch * len(train_loader)
         step_num = 0
         for index, data in enumerate(train_loader_tqdm):
             texts_origin, bert_attention_mask, image_origin, text_image_mask, labels,\
@@ -88,8 +111,9 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
 
             loss = (classify_loss + cl_loss * opt.cl_loss_alpha + cl_self_loss * opt.cl_self_loss_alpha) / opt.acc_batch_size
             loss.backward()
-            train_loader_tqdm.set_description("Train Iteration, loss: %.6f, lr: %e" %
-                                              (loss, optimizer.param_groups[0]['lr']))
+            if dist.get_rank() == 0 :
+                train_loader_tqdm.set_description("Train Iteration, loss: %.6f, lr: %e" %
+                                                (loss, optimizer.param_groups[0]['lr']))
 
             if (index + 1) % opt.acc_grad == 0:
                 if log_summary_writer:
@@ -122,8 +146,9 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
 
         save_content = 'Epoch: %d:\nTrain: Accuracy: %.6f, F1(weighted): %.6f, Precision(weighted): %.6f, R(weighted): %.6f, F1(macro): %.6f, Precision: %.6f, R: %.6f, loss: %.6f' % \
                        (epoch, train_accuracy, train_F1_weighted, train_precision_weighted, train_R_weighted, train_F1, train_precision, train_R, run_loss)
-        WriteFile(opt.save_model_path, 'train_correct_log.txt', save_content + '\n', 'a+')
-        print(save_content, ' ' * 200)
+        if is_main_process():
+            WriteFile(opt.save_model_path, 'train_correct_log.txt', save_content + '\n', 'a+')
+            print(save_content, ' ' * 200)
 
         if log_summary_writer:
             log_summary_writer.add_scalar('train_info/loss_epoch', run_loss, global_step=epoch)
@@ -146,4 +171,9 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
             "run_loss": run_loss
         }
         # debug：正常运行不要把下面的代码注释掉
-        last_F1, last_Accuracy = dev_process.dev_process(opt, critertion, cl_model, dev_loader, test_loader, last_F1, last_Accuracy, train_log, log_summary_writer)
+        if epoch %1 == 0 and is_main_process():
+            print(f"GPU: {dist.get_rank()} eval")
+            last_F1, last_Accuracy = dev_process.dev_process(opt, critertion, cl_model.module, dev_loader, test_loader, last_F1, last_Accuracy, train_log, log_summary_writer)
+        print(f"GPU: {dist.get_rank()} barriered")
+        dist.barrier()
+        print(f"GPU: {dist.get_rank()} out barriered")

@@ -20,16 +20,19 @@ from util.write_file import WriteFile
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 from model import ModelParam
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel 
 
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
+    parse.add_argument('--local_rank', type=int)
     parse.add_argument('-run_type', type=int,
                        default=1, help='1: train, 2: debug train, 3: dev, 4: test')
     parse.add_argument('-save_model_path', type=str,
                        default='checkpoint', help='save the good model.pth path')
     parse.add_argument('-add_note', type=str, default='', help='Additional instructions when saving files')
-    parse.add_argument('-gpu_num', type=str, default='0', help='gpu index')
+    parse.add_argument('-gpu_num', type=int, default=1, help='gpu index')
     parse.add_argument('-gpu0_bsz', type=int, default=0,
                        help='the first GPU batch size')
     parse.add_argument('-epoch', type=int, default=10, help='train epoch num')
@@ -89,8 +92,8 @@ if __name__ == '__main__':
     parse.add_argument('-fixed_image_model', action='store_true', default=False, help='是否固定图像模型的参数')
 
     opt = parse.parse_args()
-
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(opt.gpu_num)
+    gpu_nums = ','.join(map(str, range(opt.gpu_num)))
+    os.environ['CUDA_VISIBLE_DEVICES'] = gpu_nums  #str(opt.gpu_num)
     opt.epoch = opt.train_fuse_model_epoch + opt.epoch
 
     dt = datetime.now()
@@ -111,7 +114,10 @@ if __name__ == '__main__':
     cl_fuse_model = model.CLModel(opt)
     if opt.cuda is True:
         assert torch.cuda.is_available()
-        if len(opt.gpu_num) > 1:
+        if opt.gpu_num > 1:
+            print(f"gpu num：{opt.gpu_num}")
+            #gpu_nums = len(opt.gpu_num.split(","))
+            #print(f"gpu 个数：{gpu_nums}")
             if opt.gpu0_bsz > 0:
                 cl_fuse_model = torch.nn.DataParallel(cl_fuse_model).cuda()
             else:
@@ -121,12 +127,18 @@ if __name__ == '__main__':
                 python -m torch.distributed.launch --nproc_per_node=2 main.py
                 """
                 print('当前GPU编号：', opt.local_rank)
-                torch.cuda.set_device(opt.local_rank) # 在进行其他操作之前必须先设置这个
-                torch.distributed.init_process_group(backend='nccl')
+                print('初始化:', opt.local_rank)
+                torch.cuda.set_device(opt.local_rank) # 在进行其他操作之前必须先设置这个、
+                print('启动分布:', opt.local_rank)
+                dist.init_process_group(backend='nccl', init_method="tcp://127.0.0.1:12345", rank=opt.local_rank, world_size=opt.gpu_num)
                 cl_fuse_model = cl_fuse_model.cuda()
-                cl_fuse_model = nn.parallel.DistributedDataParallel(cl_fuse_model, find_unused_parameters=True)
+                print('分布模型:', opt.local_rank)
+                cl_fuse_model = DistributedDataParallel(cl_fuse_model, device_ids=[opt.local_rank],
+                find_unused_parameters=True)
+                distributed = 1
         else:
             cl_fuse_model = cl_fuse_model.cuda()
+
         critertion = critertion.cuda()
 
     print('Init Data Process:')
@@ -156,11 +168,11 @@ if __name__ == '__main__':
 
     # data_type:标识数据的类型，1是训练数据，2是开发集，3是测试数据
     train_loader, opt.train_data_len = data_process.data_process(opt, train_data_path, tokenizer, photo_path, data_type=1, data_translation_path=data_translation_path,
-                                                                 image_coordinate=image_coordinate)
+                                                                 image_coordinate=image_coordinate, distributed=distributed)
     dev_loader, opt.dev_data_len = data_process.data_process(opt, dev_data_path, tokenizer, photo_path, data_type=2, data_translation_path=data_translation_path,
-                                                             image_coordinate=image_coordinate)
+                                                             image_coordinate=image_coordinate, distributed=distributed)
     test_loader, opt.test_data_len = data_process.data_process(opt, test_data_path, tokenizer, photo_path, data_type=3, data_translation_path=data_translation_path,
-                                                               image_coordinate=image_coordinate)
+                                                               image_coordinate=image_coordinate, distributed=distributed)
 
     if opt.warmup_step_epoch > 0:
         opt.warmup_step = opt.warmup_step_epoch * len(train_loader)
@@ -172,7 +184,8 @@ if __name__ == '__main__':
         opt.scheduler_num_lr = opt.lr / opt.scheduler_step
 
     print(opt)
-    opt.save_model_path = WriteFile(opt.save_model_path, 'train_correct_log.txt', str(opt) + '\n\n', 'a+', change_file_name=True)
+    if dist.get_rank() == 0:
+        opt.save_model_path = WriteFile(opt.save_model_path, 'train_correct_log.txt', str(opt) + '\n\n', 'a+', change_file_name=True)
     log_summary_writer = None
     log_summary_writer = SummaryWriter(log_dir=opt.save_model_path)
     log_summary_writer.add_text('Hyperparameter', str(opt), global_step=1)

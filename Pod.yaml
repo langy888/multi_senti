@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: fuyubo-mvsa-multi
+  name: fuyubo-mvsa-single-bert-vitb16-dist
 spec:
   restartPolicy: Never
   hostIPC: false
@@ -23,9 +23,9 @@ spec:
           - CHOWN
       resources:
         limits:
-          nvidia.com/gpu-v100: "1"
+          nvidia.com/gpu-v100: "4"
         requests:
-          nvidia.com/gpu-v100: "1"
+          nvidia.com/gpu-v100: "4"
       volumeMounts:
         - name: data-storage
           mountPath: /datasets
@@ -33,7 +33,10 @@ spec:
           mountPath: /output
       #command: ["/bin/bash", "-c", "cd /output && export DETECTRON2_DATASETS=/datasets && bash run/train.sh detectron2/projects/UniDet/sparse_configs/Sparse-OID-q300.yaml 8"] #--eval-only MODEL.WEIGHTS run/oid_sigce.pth"] #/sensebee2/fuyubo1/UniDet/detectron2/projects/UniDet/sparse_configs/Sparse-COCO-q100.yaml
       #command: ["/bin/bash", "-c", "cd /output && sh train-single.sh 1"] #--eval-only MODEL.WEIGHTS /output/Sparse-COCO-q100-eql-focal/model_final.pth"]
-      command: ["/bin/bash", "-c", "cd /output && sh run.sh 1"]
+      #command: ["/bin/bash", "-c", "cd /output && sh run.sh mvsa_m_roberta_r50.yaml 1"]
+      #command: ["/bin/bash", "-c", "cd /output && sh train-mul-dist.sh 4"]
+      command: ["/bin/bash", "-c", "cd /output && sh train-single-dist.sh 4"]
+      #command: ["/bin/bash", "-c", "cd /output && rm -f pretrained_model && ln -s /data/pretrained_model  /output/pretrained_model && sh run.sh mvsa_m_bert_r50.yaml 1"]
       #command: ["/bin/bash", "-c", "cd /output && export DETECTRON2_DATASETS=/datasets && bash run/train.sh detectron2/projects/UniDet/sparse_configs/Sparse-O365-q100.yaml 8 --eval-only MODEL.WEIGHTS /lustre/sparse_rcnn/o365_focal.pth"]
       #command: ["/bin/bash", "-c", "cd /output && export DETECTRON2_DATASETS=/datasets && bash run/train.sh detectron2/projects/UniDet/sparse_configs/Multi_Head-q100.yaml 8"]
       args: []

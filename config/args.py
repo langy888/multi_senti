@@ -1,5 +1,9 @@
 import argparse
 def add_parser(parse):
+    parse.add_argument('--nodes', type=int, default=1)
+    parse.add_argument('--gpu_num', type=int, default=1)
+    parse.add_argument('-nr', '--nr', default=0, type=int,
+                        help='ranking within the nodes')
     parse.add_argument('-run_type', type=int,
                         default=1, help='1: train, 2: debug train, 3: dev, 4: test')
     parse.add_argument('-save_model_path', type=str,

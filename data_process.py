@@ -18,7 +18,7 @@ import numpy as np
 from util.image_augmentation.augmentations import RandAugment
 import copy
 import matplotlib.pyplot as plt
-
+from torch.utils.data.distributed import DistributedSampler
 
 # debug
 # flagflag=0
@@ -54,8 +54,10 @@ class SentenceDataset(Dataset):
         self.data_translation_id_to_text_dict = {data['id']: data['text_translation'] for data in file_content}
 
         if opt.text_model == 'bert-base':
-            self.text_token_list = [text_tokenizer.tokenize('[CLS]' + text + '[SEP]') for text in tqdm(self.text_list, desc='convert text to token')]
-            self.text_translation_id_to_token_list = {index: text_tokenizer.tokenize('[CLS]' + text + '[SEP]') for index, text in self.data_translation_id_to_text_dict.items()}
+            pass
+
+        self.text_token_list = [text_tokenizer.tokenize('[CLS]' + text + '[SEP]') for text in tqdm(self.text_list, desc='convert text to token')]
+        self.text_translation_id_to_token_list = {index: text_tokenizer.tokenize('[CLS]' + text + '[SEP]') for index, text in self.data_translation_id_to_text_dict.items()}
         self.text_token_list = [text if len(text) < opt.word_length else text[0: opt.word_length] for text in
                                 self.text_token_list]
         self.text_to_id = [text_tokenizer.convert_tokens_to_ids(text_token) for text_token in
@@ -167,7 +169,7 @@ def get_resize(image_size):
     return image_size
 
 
-def data_process(opt, data_path, text_tokenizer, photo_path, data_type, data_translation_path=None, image_coordinate=None):
+def data_process(opt, data_path, text_tokenizer, photo_path, data_type, data_translation_path=None, image_coordinate=None, distributed=0):
 
     transform_base = transforms.Compose(
         [
@@ -198,7 +200,9 @@ def data_process(opt, data_path, text_tokenizer, photo_path, data_type, data_tra
                               data_translation_path=data_translation_path, image_coordinate=image_coordinate)
 
     data_loader = DataLoader(dataset, batch_size=opt.acc_batch_size,
-                             shuffle=True if data_type == 1 else False,
-                             num_workers=opt.num_workers, collate_fn=Collate(opt), pin_memory=True if opt.cuda else False)
+                             shuffle=True if ( not distributed and data_type == 1 ) else False,
+                             num_workers=opt.num_workers, collate_fn=Collate(opt), 
+                             pin_memory=True if opt.cuda else False,
+                             sampler=DistributedSampler(dataset) if (distributed and data_type==1) else None)
     return data_loader, dataset.__len__()
 

@@ -8,7 +8,8 @@ import torch.nn.modules as nn
 import torchvision.models as cv_models
 import torch
 import os
-from transformers import BertConfig, BertForPreTraining, RobertaForMaskedLM, RobertaModel, RobertaConfig, AlbertModel, AlbertConfig
+from transformers import BertConfig, BertForPreTraining, AutoTokenizer, AutoModel,\
+    ViTConfig, ViTModel, ViTFeatureExtractor
 import math
 import matplotlib.pyplot as plt
 from pre_model import RobertaEncoder
@@ -105,6 +106,12 @@ class TextModel(nn.Module):
             self.config = BertConfig.from_pretrained(abl_path + 'bert-base-uncased/')
             self.model = BertForPreTraining.from_pretrained(abl_path + 'bert-base-uncased/', config=self.config)
             self.model = self.model.bert
+        else:
+            #print("=================")
+            #print(os.path.join(abl_path, 'pretrained_model', opt.text_model))
+            self.config = BertConfig.from_pretrained(os.path.join('pretrained_model', opt.text_model))
+            self.model = AutoModel.from_pretrained(os.path.join('pretrained_model',  opt.text_model))
+            #self.model = self.model.roberta
 
         for param in self.model.parameters():
             param.requires_grad = True
@@ -129,35 +136,54 @@ class TextModel(nn.Module):
 class ImageModel(nn.Module):
     def __init__(self, opt):
         super(ImageModel, self).__init__()
-        if opt.image_model == 'resnet-152':
-            self.resnet = cv_models.resnet152(pretrained=True)
-        elif opt.image_model == 'resnet-101':
-            self.resnet = cv_models.resnet101(pretrained=True)
-        elif opt.image_model == 'resnet-50':
-            self.resnet = cv_models.resnet50(pretrained=True)
-        elif opt.image_model == 'resnet-34':
-            self.resnet = cv_models.resnet34(pretrained=True)
-        elif opt.image_model == 'resnet-18':
-            self.resnet = cv_models.resnet18(pretrained=True)
-        self.resnet_encoder = nn.Sequential(*(list(self.resnet.children())[:-2]))
-        self.resnet_avgpool = nn.Sequential(list(self.resnet.children())[-2])
-        self.output_dim = self.resnet_encoder[7][2].conv3.out_channels
+        self.image_model = opt.image_model
+        if 'resnet' in opt.image_model:
+            if opt.image_model == 'resnet-152':
+                self.resnet = cv_models.resnet152(pretrained=True)
+            elif opt.image_model == 'resnet-101':
+                self.resnet = cv_models.resnet101(pretrained=True)
+            elif opt.image_model == 'resnet-50':
+                self.resnet = cv_models.resnet50(pretrained=True)
+            elif opt.image_model == 'resnet-34':
+                self.resnet = cv_models.resnet34(pretrained=True)
+            elif opt.image_model == 'resnet-18':
+                self.resnet = cv_models.resnet18(pretrained=True)
+            self.resnet_encoder = nn.Sequential(*(list(self.resnet.children())[:-2]))
+            self.resnet_avgpool = nn.Sequential(list(self.resnet.children())[-2])
+            self.output_dim = self.resnet_encoder[7][2].conv3.out_channels
+            for param in self.resnet.parameters():
+                if opt.fixed_image_model:
+                    param.requires_grad = False
+                else:
+                    param.requires_grad = True
 
-        for param in self.resnet.parameters():
-            if opt.fixed_image_model:
-                param.requires_grad = False
-            else:
-                param.requires_grad = True
+        elif 'vit' in opt.image_model:
+            self.feature_extractor = ViTFeatureExtractor.from_pretrained(os.path.join('pretrained_model',  opt.image_model))
+            self.vit = ViTModel.from_pretrained(os.path.join('pretrained_model',  opt.image_model)) 
+            self.output_dim = self.vit.config.hidden_size
+
+            for param in self.vit.parameters():
+                if opt.fixed_image_model:
+                    param.requires_grad = False
+                else:
+                    param.requires_grad = True
 
     def get_output_dim(self):
         return self.output_dim
 
     def forward(self, images):
-        image_encoder = self.resnet_encoder(images)
-        # image_encoder = self.conv_output(image_encoder)
-        image_cls = self.resnet_avgpool(image_encoder)
-        image_cls = torch.flatten(image_cls, 1)
-        return image_encoder, image_cls
+        if 'resnet' in self.image_model:
+            image_encoder = self.resnet_encoder(images)
+            # image_encoder = self.conv_output(image_encoder)
+            image_cls = self.resnet_avgpool(image_encoder)
+            image_cls = torch.flatten(image_cls, 1)
+            return image_encoder, image_cls
+        if 'vit' in  self.image_model:
+            pixel_values = self.feature_extractor(images=images, return_tensors='pt')
+            outputs = self.vit(**pixel_values)
+            image_encoder = outputs.last_hidden_state
+            image_cls = outputs.pooler_output
+            return image_encoder, image_cls
 
 
 class FuseModel(nn.Module):
@@ -227,10 +253,10 @@ class FuseModel(nn.Module):
 
     def forward(self, text_inputs, bert_attention_mask, image_inputs, text_image_mask):
         text_encoder = self.text_model(text_inputs, attention_mask=bert_attention_mask)
-        text_cls = text_encoder.pooler_output
-        text_encoder = text_encoder.last_hidden_state
-        text_init = self.text_change(text_encoder)
-        image_encoder, image_cls = self.image_model(image_inputs)
+        text_cls = text_encoder.pooler_output # N * H
+        text_encoder = text_encoder.last_hidden_state # N * L * H
+        text_init = self.text_change(text_encoder) # N * L * H
+        image_encoder, image_cls = self.image_model(image_inputs) # N * X * Hi  N * Hi 
         if self.image_output_type == 'all':
             image_encoder = image_encoder.contiguous().view(image_encoder.size(0), -1, image_encoder.size(1))
             image_encoder_init = self.image_change(image_encoder)

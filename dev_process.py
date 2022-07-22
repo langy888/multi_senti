@@ -15,9 +15,10 @@ import test_process
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 # import tensorflow as tf
-
+import torch.distributed as dist
 
 def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1=None, last_Accuracy=None, train_log=None, log_summary_writer:SummaryWriter=None):
+
     y_true = []
     y_pre = []
     total_labels = 0

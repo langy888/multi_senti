@@ -23,15 +23,17 @@ def WriteFile(file_dir, file_name, file_content, file_mode, change_file_name=Fal
         while os.path.exists(file_dir):
             # 这部分的代码改变方式只适合于55-2021-04-28-14-35-09-single-3-，同时这里改变的是毫秒
             file_dir_list = file_dir.split('-')
-            file_dir_list[6] = str((int(file_dir_list[6]) + random.randint(61, 119)) % 60)
-            if len(file_dir_list[6]) == 1:
-                file_dir_list[6] = '0' + file_dir_list[6]
+            file_dir_list[5] = str((int(file_dir_list[5]) + random.randint(61, 119)) % 60)
+            if len(file_dir_list[5]) == 1:
+                file_dir_list[5] = '0' + file_dir_list[5]
             file_dir = '-'.join(file_dir_list)
         os.mkdir(file_dir)
     f = open(file_dir + '/' + file_name, file_mode, encoding='utf-8')
     f.write(file_content)
     f.close()
     return file_dir
+
+#2022-07-21-02-35-21-MVSA-multiple-4-att-64-2-roberta_base-
 
 
 # file_dir = '55-2021-04-28-14-35-09-single-3-'

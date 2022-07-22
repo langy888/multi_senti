@@ -9,7 +9,7 @@ train_fuse_model_epoch: 20
 epoch : 30
 warmup_step_epoch: 2
 image_model: resnet-50
-text_model: bert-base
+text_model: roberta_base
 fuse_type: att
 batch: 64
 acc_grad: 1

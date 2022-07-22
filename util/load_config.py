@@ -1,6 +1,6 @@
 import yaml
 import sys
-sys.path.add("/mnt/lustre/sensebee/backup/fuyubo1/multi_senti/CLMLF")
+#sys.path.add("/mnt/lustre/sensebee/backup/fuyubo1/multi_senti/CLMLF")
 CONFIG_ROOT = "config/"
 def load_config(config_path):
     config_path = CONFIG_ROOT + config_path
