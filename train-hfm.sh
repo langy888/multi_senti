@@ -15,6 +15,7 @@ acc_grad=1
 tran_num_layers=5
 image_num_layers=1
 
+
 python main.py -cuda -gpu_num $1 -epoch ${epoch} -num_workers 8 \
         -add_note ${data_type}-${tran_num_layers}-${fuse_type}-${batch}-${image_num_layers}-${text_model} \
         -data_type ${data_type} -text_model ${text_model} -image_model resnet-50 \

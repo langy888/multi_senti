@@ -16,11 +16,14 @@ import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 # import tensorflow as tf
 import torch.distributed as dist
+import os
+import torch.nn.functional as F
 
 def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1=None, last_Accuracy=None, train_log=None, log_summary_writer:SummaryWriter=None):
 
     y_true = []
     y_pre = []
+    orig_id =[] 
     total_labels = 0
     dev_loss = 0
 
@@ -29,34 +32,71 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
     with torch.no_grad():
         cl_model.eval()
         dev_loader_tqdm = tqdm(dev_loader, desc='Dev Iteration')
-        epoch_step_num = train_log['epoch'] * dev_loader_tqdm.total
+        if train_log:
+            epoch_step_num = train_log['epoch'] * dev_loader_tqdm.total
         step_num = 0
         for index, data in enumerate(dev_loader_tqdm):
-            texts_origin, bert_attention_mask, image_origin, text_image_mask, labels, \
-            texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _ = data
-            # continue
+            if opt.gcn:
 
-            if opt.cuda is True:
-                texts_origin = texts_origin.cuda()
-                bert_attention_mask = bert_attention_mask.cuda()
-                image_origin = image_origin.cuda()
-                text_image_mask = text_image_mask.cuda()
-                labels = labels.cuda()
-            orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin,
-                                       text_image_mask=text_image_mask)
-            origin_res = cl_model(orgin_param)
+                texts_origin, bert_attention_mask, image_origin, labels, batch_boxes,\
+                    graphs, text_image_mask, target_labels, origin_indexes,_,_,_ = data
 
-            loss = critertion(origin_res, labels) / opt.acc_batch_size
+                if opt.cuda is True:
+                    texts_origin = texts_origin.cuda()
+                    bert_attention_mask = bert_attention_mask.cuda()
+                    image_origin = image_origin.cuda()
+                    text_image_mask = text_image_mask.cuda()
+                    labels = labels.cuda()
+                    graphs = graphs.cuda()
+                    for i in range(len(target_labels)):
+                        target_labels[i] = target_labels[i].cuda()
+                    for i in range(len(batch_boxes)):
+                        batch_boxes[i] = batch_boxes[i].cuda()
+
+
+                orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin, text_image_mask=text_image_mask, boxes=batch_boxes, graph=graphs)
+                #augment_param.set_data_param(texts=texts_augment, bert_attention_mask=bert_attention_mask_augment, images=image_augment, text_image_mask=text_image_mask_augment)
+
+                origin_res = cl_model(orgin_param)
+
+                loss = critertion(origin_res, labels) / opt.acc_batch_size
+                
+            else:
+
+                texts_origin, bert_attention_mask, image_origin, text_image_mask, labels, \
+                texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _ , origin_indexes, _, _ = data
+                # continue
+
+                if opt.cuda is True:
+                    texts_origin = texts_origin.cuda()
+                    bert_attention_mask = bert_attention_mask.cuda()
+                    image_origin = image_origin.cuda()
+                    text_image_mask = text_image_mask.cuda()
+                    labels = labels.cuda()
+                orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin,
+                                        text_image_mask=text_image_mask)
+                origin_res = cl_model(orgin_param)
+
+                loss = critertion(origin_res, labels) / opt.acc_batch_size
+
             dev_loss += loss.item()
             _, predicted = torch.max(origin_res, 1)
             total_labels += labels.size(0)
             y_true.extend(labels.cpu())
             y_pre.extend(predicted.cpu())
+            orig_id.extend(origin_indexes)
 
             dev_loader_tqdm.set_description("Dev Iteration, loss: %.6f" % loss)
             if log_summary_writer:
                 log_summary_writer.add_scalar('dev_info/loss', loss.item(), global_step=step_num + epoch_step_num)
             step_num += 1
+
+        all_pred = []
+        bad_case = []
+        for gt, pred, ori_index in zip(y_true, y_pre, orig_id):
+            all_pred.append(f"{ori_index},{gt},{pred}")
+            if gt != pred:
+                bad_case.append(f"{ori_index},{gt},{pred}")
 
         dev_loss /= total_labels
         y_true = np.array(y_true)
@@ -74,6 +114,15 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
 
         print(save_content)
 
+        if opt.run_type == 2:
+            with open(os.path.join(opt.save_model_path,'dev_all_pred.txt'),'w') as f:
+                for l in all_pred:
+                    f.write(l+'\n')
+            with open(os.path.join(opt.save_model_path,'dev_bad_case.txt'),'w') as f:
+                for l in bad_case:
+                    f.write(l+'\n')
+            exit()
+
         if log_summary_writer:
             log_summary_writer.add_scalar('dev_info/loss_epoch', dev_loss, global_step=train_log['epoch'])
             log_summary_writer.add_scalar('dev_info/acc', dev_accuracy, global_step=train_log['epoch'])
@@ -83,11 +132,14 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
             log_summary_writer.add_scalar('dev_info/f1_ma', dev_F1, global_step=train_log['epoch'])
             log_summary_writer.flush()
 
+
+
+
         if last_F1 is not None:
             WriteFile(
                 opt.save_model_path, 'train_correct_log.txt', save_content + '\n', 'a+')
             # 运行测试集
-            test_process.test_process(opt, critertion, cl_model, test_loader, last_F1, log_summary_writer, train_log['epoch'])
+            #test_process.test_process(opt, critertion, cl_model, test_loader, last_F1, log_summary_writer, train_log['epoch'])
 
             dev_log = {
                 "dev_accuracy": dev_accuracy,
@@ -101,10 +153,15 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
             }
 
             last_Accuracy, is_save_model, model_name = compare_to_save(last_Accuracy, dev_accuracy, opt, cl_model, train_log, dev_log, 'Acc', opt.save_acc, add_enter=False)
+
             if is_save_model is True:
+                test_process.test_process(opt, critertion, cl_model, test_loader, last_F1, log_summary_writer, train_log['epoch'])
                 if opt.data_type == 'HFM':
                     last_F1, is_save_model, model_name = compare_to_save(last_F1, dev_F1, opt, cl_model, train_log, dev_log, 'F1-marco', opt.save_F1, 'F1-marco', model_name)
                 else:
+                    with open(os.path.join(opt.save_model_path,'dev_bad_case.txt'),'w') as f:
+                        for l in bad_case:
+                            f.write(l+'\n')
                     last_F1, is_save_model, model_name = compare_to_save(last_F1, dev_F1_weighted, opt, cl_model, train_log, dev_log, 'F1', opt.save_F1, 'F1', model_name)
             else:
                 if opt.data_type == 'HFM':

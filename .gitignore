@@ -1,5 +1,12 @@
 /dataset/data/MVSA-multiple/dataset_image
 /dataset/data/MVSA-single/dataset_image
+/dataset/data/HFM/dataset_image
+/dataset/data/HFM/dataset_boxes
+/dataset/data/HFM/dev_badcase
 /bert-base-uncased
 /checkpoint
+/dataset/data/HFM/*.data
+/dataset/data/HFM/*.pkl
+/dataset
+/config
 /pretrained_model

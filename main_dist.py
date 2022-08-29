@@ -14,7 +14,7 @@ import torch.nn.modules as nn
 import dev_process
 import test_process
 import model
-from transformers import BertTokenizer, RobertaTokenizer, AutoTokenizer
+from transformers import BertTokenizer, RobertaTokenizer, AutoTokenizer, CLIPConfig
 import numpy as np
 from util.write_file import WriteFile
 from datetime import datetime
@@ -22,11 +22,21 @@ from torch.utils.tensorboard import SummaryWriter
 from model import ModelParam
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel 
+import sys
+import math
+sys.path.append("/mnt/lustre/sensebee/backup/fuyubo1/multi_senti/CLMLF/")
 
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
+    parse.add_argument('-gcn', default=0, type=int)
     parse.add_argument('--local_rank', type=int)
+    parse.add_argument('-debug', type=int,
+                       default=0, help='') 
+    parse.add_argument('-update_period', type=int, default=0)  
+    parse.add_argument('-no_extra_img_trans', type=int, default=0)    
+    parse.add_argument('-use_clip_proj', type=int, default=0) 
+    parse.add_argument('-test_model_path', type=str, default="")  
     parse.add_argument('-run_type', type=int,
                        default=1, help='1: train, 2: debug train, 3: dev, 4: test')
     parse.add_argument('-save_model_path', type=str,
@@ -81,15 +91,16 @@ if __name__ == '__main__':
     parse.add_argument('-tran_num_layers', type=int, default=3, help='The layer of transformer')
     parse.add_argument('-image_num_layers', type=int, default=3, help='The layer of image transformer')
     parse.add_argument('-train_fuse_model_epoch', type=int, default=10, help='The number of epoch of the model that only trains the fusion layer')
-    parse.add_argument('-cl_loss_alpha', type=int, default=1, help='Weight of contrastive learning loss value')
-    parse.add_argument('-cl_self_loss_alpha', type=int, default=1, help='Weight of contrastive learning loss value')
+    parse.add_argument('-cl_loss_alpha', type=float, default=1, help='Weight of contrastive learning loss value')
+    parse.add_argument('-cl_self_loss_alpha', type=float, default=1, help='Weight of contrastive learning loss value')
+    parse.add_argument('-cls_loss_alpha', type=float, default=1, help='Weight of contrastive learning loss value')
     parse.add_argument('-temperature', type=float, default=0.07, help='Temperature used to calculate contrastive learning loss')
 
 
     # 布尔类型的参数
     parse.add_argument('-cuda', action='store_true', default=False,
                        help='if True: use cuda. if False: use cpu')
-    parse.add_argument('-fixed_image_model', action='store_true', default=False, help='是否固定图像模型的参数')
+    parse.add_argument('-fixed_image_model', type=int, default=0, help='是否固定图像模型的参数')
 
     opt = parse.parse_args()
     gpu_nums = ','.join(map(str, range(opt.gpu_num)))
@@ -111,11 +122,28 @@ if __name__ == '__main__':
     if opt.loss_type == 'CE':
         critertion = nn.CrossEntropyLoss()
 
+    abl_path =  '' if not opt.debug else "/mnt/lustre/sensebee/backup/fuyubo1/multi_senti/CLMLF/"
+    opt.abl_path = abl_path + 'pretrained_model/'
+    if 'clip' in opt.image_model and opt.use_clip_proj:
+        clipconfig = CLIPConfig.from_pretrained(opt.abl_path+opt.image_model)
+        opt.tran_dim = clipconfig.projection_dim
+
     cl_fuse_model = model.CLModel(opt)
+
+    for name, param in cl_fuse_model.named_parameters():
+        if "text_model" not in name and "image_model" not in name:
+            if param.requires_grad:
+                if len(param.shape) > 1:
+                    torch.nn.init.xavier_uniform_(param)
+                else:
+                    stdv = 1. / math.sqrt(param.shape[0])
+                    torch.nn.init.uniform_(param, a=-stdv, b=stdv)                
+
+    opt.distributed = 0
     if opt.cuda is True:
         assert torch.cuda.is_available()
         if opt.gpu_num > 1:
-            print(f"gpu num：{opt.gpu_num}")
+            print(f"gpu num: {opt.gpu_num}")
             #gpu_nums = len(opt.gpu_num.split(","))
             #print(f"gpu 个数：{gpu_nums}")
             if opt.gpu0_bsz > 0:
@@ -123,56 +151,65 @@ if __name__ == '__main__':
             else:
                 print('multi-gpu')
                 """
-                单机多卡的运行方式，nproc_per_node表示使用的GPU的数量
+                单机多卡的运行方式,nproc_per_node表示使用的GPU的数量
                 python -m torch.distributed.launch --nproc_per_node=2 main.py
                 """
-                print('当前GPU编号：', opt.local_rank)
-                print('初始化:', opt.local_rank)
+                print('当前GPU编号:', opt.local_rank)
                 torch.cuda.set_device(opt.local_rank) # 在进行其他操作之前必须先设置这个、
-                print('启动分布:', opt.local_rank)
                 dist.init_process_group(backend='nccl', init_method="tcp://127.0.0.1:12345", rank=opt.local_rank, world_size=opt.gpu_num)
                 cl_fuse_model = cl_fuse_model.cuda()
                 print('分布模型:', opt.local_rank)
                 cl_fuse_model = DistributedDataParallel(cl_fuse_model, device_ids=[opt.local_rank],
                 find_unused_parameters=True)
-                distributed = 1
+                opt.distributed = 1
         else:
             cl_fuse_model = cl_fuse_model.cuda()
 
         critertion = critertion.cuda()
-
+    distributed = opt.distributed 
     print('Init Data Process:')
     tokenizer = None
-    abl_path = ''
+    
     if opt.text_model == 'bert-base':
-        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased/vocab.txt')
+        tokenizer = BertTokenizer.from_pretrained(abl_path + 'bert-base-uncased/vocab.txt')
     else:
-        tokenizer = AutoTokenizer.from_pretrained(os.path.join('pretrained_model',  opt.text_model))
+        tokenizer = AutoTokenizer.from_pretrained(os.path.join(abl_path, 'pretrained_model',  opt.text_model))
 
     if opt.data_type == 'HFM':
         data_path_root = abl_path + 'dataset/data/HFM/'
         train_data_path = data_path_root + 'train.json'
-        dev_data_path = data_path_root + 'valid.json'
+        dev_data_path = data_path_root + 'valid.json' #'valid.json'
         test_data_path = data_path_root + 'test.json'
         photo_path = data_path_root + '/dataset_image'
         image_coordinate = None
         data_translation_path = data_path_root + '/HFM.json'
+        text_image_labels = None
+        train_gcn = data_path_root + 'train_graph8.pkl'
+        test_gcn = data_path_root + 'valid_graph8.pkl'
+        val_gcn  = data_path_root + 'test_graph8.pkl'
     else:
         data_path_root = abl_path + 'dataset/data/' + opt.data_type + '/' + opt.data_path_name + '/'
         train_data_path = data_path_root + 'train.json'
+        text_image_labels = None #data_path_root + 'text_image_label.json'
         dev_data_path = data_path_root + 'dev.json'
         test_data_path = data_path_root + 'test.json'
+        data_translation_path = abl_path + 'dataset/data/' + opt.data_type + '/' + opt.data_type + '_translation.json'
+        # train_data_path = data_path_root + 'train_clean.json'
+        # dev_data_path = data_path_root + 'dev_clean.json'
+        # test_data_path = data_path_root + 'test_clean.json'
+        # data_translation_path = abl_path + 'dataset/data/' + opt.data_type + '/' + opt.data_type + '_translation_clean.json'
         photo_path = abl_path + 'dataset/data/' + opt.data_type + '/dataset_image'
         image_coordinate = None
-        data_translation_path = abl_path + 'dataset/data/' + opt.data_type + '/' + opt.data_type + '_translation.json'
+        train_gcn, test_gcn, val_gcn = None, None, None
+
 
     # data_type:标识数据的类型，1是训练数据，2是开发集，3是测试数据
     train_loader, opt.train_data_len = data_process.data_process(opt, train_data_path, tokenizer, photo_path, data_type=1, data_translation_path=data_translation_path,
-                                                                 image_coordinate=image_coordinate, distributed=distributed)
+                                                                 image_coordinate=image_coordinate, distributed=distributed, text_image_labels_path=text_image_labels, gcn_root=train_gcn)
     dev_loader, opt.dev_data_len = data_process.data_process(opt, dev_data_path, tokenizer, photo_path, data_type=2, data_translation_path=data_translation_path,
-                                                             image_coordinate=image_coordinate, distributed=distributed)
+                                                             image_coordinate=image_coordinate, distributed=distributed, gcn_root=val_gcn)
     test_loader, opt.test_data_len = data_process.data_process(opt, test_data_path, tokenizer, photo_path, data_type=3, data_translation_path=data_translation_path,
-                                                               image_coordinate=image_coordinate, distributed=distributed)
+                                                               image_coordinate=image_coordinate, distributed=distributed, gcn_root=test_gcn)
 
     if opt.warmup_step_epoch > 0:
         opt.warmup_step = opt.warmup_step_epoch * len(train_loader)
@@ -184,7 +221,7 @@ if __name__ == '__main__':
         opt.scheduler_num_lr = opt.lr / opt.scheduler_step
 
     print(opt)
-    if dist.get_rank() == 0:
+    if opt.cuda and opt.gpu_num > 1 and dist.get_rank() == 0:
         opt.save_model_path = WriteFile(opt.save_model_path, 'train_correct_log.txt', str(opt) + '\n\n', 'a+', change_file_name=True)
     log_summary_writer = None
     log_summary_writer = SummaryWriter(log_dir=opt.save_model_path)
@@ -196,8 +233,10 @@ if __name__ == '__main__':
         train_process.train_process(opt, train_loader, dev_loader, test_loader, cl_fuse_model, critertion, log_summary_writer)
     elif opt.run_type == 2:
         print('\nTest Begin')
-        model_path = "checkpoint/best_model/best-model.pth"
+        model_path = opt.test_model_path
         cl_fuse_model.load_state_dict(torch.load(model_path, map_location='cpu'), strict=True)
+        #_ , _ = dev_process.dev_process(opt, critertion, cl_fuse_model, dev_loader)
         test_process.test_process(opt, critertion, cl_fuse_model, test_loader, epoch=1)
+        #_ , _ = dev_process.dev_process(opt, critertion, cl_fuse_model, dev_loader)
 
     log_summary_writer.close()

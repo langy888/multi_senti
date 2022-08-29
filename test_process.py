@@ -12,12 +12,13 @@ from tqdm import tqdm
 import numpy as np
 from  torch.utils.tensorboard import SummaryWriter
 # import tensorflow as tf
-import math
+import os
 
 
 def test_process(opt, critertion, cl_model, test_loader, last_F1=None, log_summary_writer: SummaryWriter=None, epoch=None):
     y_true = []
     y_pre = []
+    orig_id = []
     total_labels = 0
     test_loss = 0
 
@@ -29,32 +30,65 @@ def test_process(opt, critertion, cl_model, test_loader, last_F1=None, log_summa
         epoch_step_num = epoch * test_loader_tqdm.total
         step_num = 0
         for index, data in enumerate(test_loader_tqdm):
-            texts_origin, bert_attention_mask, image_origin, text_image_mask, labels, \
-            texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _ = data
-            # continue
+            if opt.gcn:
 
-            if opt.cuda is True:
-                texts_origin = texts_origin.cuda()
-                bert_attention_mask = bert_attention_mask.cuda()
-                image_origin = image_origin.cuda()
-                text_image_mask = text_image_mask.cuda()
-                labels = labels.cuda()
+                texts_origin, bert_attention_mask, image_origin, labels, batch_boxes,\
+                    graphs, text_image_mask, target_labels, origin_indexes,_,_,_ = data
 
-            orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin,
-                                       text_image_mask=text_image_mask)
-            origin_res = cl_model(orgin_param)
+                if opt.cuda is True:
+                    texts_origin = texts_origin.cuda()
+                    bert_attention_mask = bert_attention_mask.cuda()
+                    image_origin = image_origin.cuda()
+                    text_image_mask = text_image_mask.cuda()
+                    labels = labels.cuda()
+                    graphs = graphs.cuda()
+                    for i in range(len(target_labels)):
+                        target_labels[i] = target_labels[i].cuda()
+                    for i in range(len(batch_boxes)):
+                        batch_boxes[i] = batch_boxes[i].cuda()
 
-            loss = critertion(origin_res, labels) / opt.acc_batch_size
+
+                orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin, text_image_mask=text_image_mask, boxes=batch_boxes, graph=graphs)
+                #augment_param.set_data_param(texts=texts_augment, bert_attention_mask=bert_attention_mask_augment, images=image_augment, text_image_mask=text_image_mask_augment)
+
+                origin_res = cl_model(orgin_param)
+                loss = critertion(origin_res, labels) / opt.acc_batch_size
+            else:
+                texts_origin, bert_attention_mask, image_origin, text_image_mask, labels, \
+                texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _ , origin_indexes, _, _ = data
+                # continue
+
+                if opt.cuda is True:
+                    texts_origin = texts_origin.cuda()
+                    bert_attention_mask = bert_attention_mask.cuda()
+                    image_origin = image_origin.cuda()
+                    text_image_mask = text_image_mask.cuda()
+                    labels = labels.cuda()
+
+                orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin,
+                                        text_image_mask=text_image_mask)
+                origin_res = cl_model(orgin_param)
+
+                loss = critertion(origin_res, labels) / opt.acc_batch_size
+                
             test_loss += loss.item()
             _, predicted = torch.max(origin_res, 1)
             total_labels += labels.size(0)
             y_true.extend(labels.cpu())
             y_pre.extend(predicted.cpu())
+            orig_id.extend(origin_indexes)
 
             test_loader_tqdm.set_description("Test Iteration, loss: %.6f" % loss)
             if log_summary_writer:
                 log_summary_writer.add_scalar('test_info/loss', loss.item(), global_step=step_num + epoch_step_num)
             step_num += 1
+
+        all_pred = []
+        bad_case = []
+        for gt, pred, ori_index in zip(y_true, y_pre, orig_id):
+            all_pred.append(f"{ori_index},{gt},{pred}")
+            if gt != pred:
+                bad_case.append(f"{ori_index},{gt},{pred}")
 
         test_loss /= total_labels
         y_true = np.array(y_true)
@@ -66,6 +100,7 @@ def test_process(opt, critertion, cl_model, test_loader, last_F1=None, log_summa
         test_F1_weighted = f1_score(y_true, y_pre, average='weighted')
         test_R_weighted = recall_score(y_true, y_pre, average='weighted')
         test_precision_weighted = precision_score(y_true, y_pre, average='weighted')
+        
 
         save_content = 'Test : Accuracy: %.6f, F1(weighted): %.6f, Precision(weighted): %.6f, R(weighted): %.6f, F1(macro): %.6f, Precision: %.6f, R: %.6f, loss: %.6f' % \
             (test_accuracy, test_F1_weighted, test_precision_weighted, test_R_weighted, test_F1, test_precision, test_R, test_loss)
@@ -84,3 +119,11 @@ def test_process(opt, critertion, cl_model, test_loader, last_F1=None, log_summa
         if last_F1 is not None:
             WriteFile(
                 opt.save_model_path, 'train_correct_log.txt', save_content + '\n', 'a+')
+
+        if opt.run_type == 2:
+            with open(os.path.join(opt.save_model_path,'test_all_pred.txt'),'w') as f:
+                for l in all_pred:
+                    f.write(l+'\n')
+            with open(os.path.join(opt.save_model_path,'test_bad_case.txt'),'w') as f:
+                for l in bad_case:
+                    f.write(l+'\n')
