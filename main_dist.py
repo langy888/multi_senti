@@ -26,9 +26,21 @@ from torch.nn.parallel import DistributedDataParallel
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
+    parse.add_argument('-cll', default=0, type=int)
+    parse.add_argument('-cla', default=0, type=int)
+    parse.add_argument('-it', default=0, type=int)
+    parse.add_argument('-tt', default=0, type=int)
+    parse.add_argument('-ii', default=0, type=int)
+    parse.add_argument('-gcn', default=0, type=int)
     parse.add_argument('--local_rank', type=int)
     parse.add_argument('-run_type', type=int,
                        default=1, help='1: train, 2: debug train, 3: dev, 4: test')
+    parse.add_argument('-debug', type=int,
+                       default=0, help='') 
+    parse.add_argument('-update_period', type=int, default=0)  
+    parse.add_argument('-no_extra_img_trans', type=int, default=0)    
+    parse.add_argument('-use_clip_proj', type=int, default=0) 
+    parse.add_argument('-test_model_path', type=str, default="")  
     parse.add_argument('-save_model_path', type=str,
                        default='checkpoint', help='save the good model.pth path')
     parse.add_argument('-add_note', type=str, default='', help='Additional instructions when saving files')
@@ -62,8 +74,10 @@ if __name__ == '__main__':
                        help='train, dev and test data path name')
     parse.add_argument('-data_type', type=str, default='MVSA-single',
                        help='Train data type: MVSA-single and MVSA-multiple and HFM')
-    parse.add_argument('-word_length', type=int,
-                       default=200, help='the sentence\'s word length')
+    parse.add_argument('-max_token_length', type=int,
+                       default=77, help='the sentence\'s token length')
+    parse.add_argument('-max_else_length', type=int,
+                       default=12, help='the sentence\'s else length')
     parse.add_argument('-save_acc', type=float, default=-1, help='The default ACC threshold')
     parse.add_argument('-save_F1', type=float, default=-1, help='The default F1 threshold')
     parse.add_argument('-text_model', type=str, default='bert-base', help='language model')
@@ -89,7 +103,7 @@ if __name__ == '__main__':
     # 布尔类型的参数
     parse.add_argument('-cuda', action='store_true', default=False,
                        help='if True: use cuda. if False: use cpu')
-    parse.add_argument('-fixed_image_model', action='store_true', default=False, help='是否固定图像模型的参数')
+    parse.add_argument('-fixed_image_model', type=int, default=0, help='是否固定图像模型的参数')
 
     opt = parse.parse_args()
     gpu_nums = ','.join(map(str, range(opt.gpu_num)))
@@ -112,6 +126,7 @@ if __name__ == '__main__':
         critertion = nn.CrossEntropyLoss()
 
     cl_fuse_model = model.CLModel(opt)
+    opt.distributed = 0
     if opt.cuda is True:
         assert torch.cuda.is_available()
         if opt.gpu_num > 1:
@@ -135,7 +150,7 @@ if __name__ == '__main__':
                 print('分布模型:', opt.local_rank)
                 cl_fuse_model = DistributedDataParallel(cl_fuse_model, device_ids=[opt.local_rank],
                 find_unused_parameters=True)
-                distributed = 1
+                opt.distributed = 1
         else:
             cl_fuse_model = cl_fuse_model.cuda()
 
@@ -143,20 +158,20 @@ if __name__ == '__main__':
 
     print('Init Data Process:')
     tokenizer = None
-    abl_path = ''
+    abl_path =  '' if not opt.debug else "/mnt/lustre/sensebee/backup/fuyubo1/multi_senti/CLMLF/"
     if opt.text_model == 'bert-base':
-        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased/vocab.txt')
+        tokenizer = BertTokenizer.from_pretrained(abl_path + 'bert-base-uncased/vocab.txt')
     else:
-        tokenizer = AutoTokenizer.from_pretrained(os.path.join('pretrained_model',  opt.text_model))
+        tokenizer = AutoTokenizer.from_pretrained(os.path.join(abl_path, 'pretrained_model',  opt.text_model))
 
     if opt.data_type == 'HFM':
         data_path_root = abl_path + 'dataset/data/HFM/'
-        train_data_path = data_path_root + 'train.json'
-        dev_data_path = data_path_root + 'valid.json'
-        test_data_path = data_path_root + 'test.json'
+        train_data_path = data_path_root + 'train_e.json'
+        dev_data_path = data_path_root + 'valid_e.json'
+        test_data_path = data_path_root + 'test_e.json'
         photo_path = data_path_root + '/dataset_image'
         image_coordinate = None
-        data_translation_path = data_path_root + '/HFM.json'
+        data_translation_path = data_path_root + '/HFM_e2.json'
     else:
         data_path_root = abl_path + 'dataset/data/' + opt.data_type + '/' + opt.data_path_name + '/'
         train_data_path = data_path_root + 'train.json'
@@ -168,11 +183,11 @@ if __name__ == '__main__':
 
     # data_type:标识数据的类型，1是训练数据，2是开发集，3是测试数据
     train_loader, opt.train_data_len = data_process.data_process(opt, train_data_path, tokenizer, photo_path, data_type=1, data_translation_path=data_translation_path,
-                                                                 image_coordinate=image_coordinate, distributed=distributed)
+                                                                 image_coordinate=image_coordinate, distributed=opt.distributed)
     dev_loader, opt.dev_data_len = data_process.data_process(opt, dev_data_path, tokenizer, photo_path, data_type=2, data_translation_path=data_translation_path,
-                                                             image_coordinate=image_coordinate, distributed=distributed)
+                                                             image_coordinate=image_coordinate, distributed=opt.distributed)
     test_loader, opt.test_data_len = data_process.data_process(opt, test_data_path, tokenizer, photo_path, data_type=3, data_translation_path=data_translation_path,
-                                                               image_coordinate=image_coordinate, distributed=distributed)
+                                                               image_coordinate=image_coordinate, distributed=opt.distributed)
 
     if opt.warmup_step_epoch > 0:
         opt.warmup_step = opt.warmup_step_epoch * len(train_loader)
@@ -184,7 +199,7 @@ if __name__ == '__main__':
         opt.scheduler_num_lr = opt.lr / opt.scheduler_step
 
     print(opt)
-    if dist.get_rank() == 0:
+    if not opt.cuda or dist.get_rank() == 0:
         opt.save_model_path = WriteFile(opt.save_model_path, 'train_correct_log.txt', str(opt) + '\n\n', 'a+', change_file_name=True)
     log_summary_writer = None
     log_summary_writer = SummaryWriter(log_dir=opt.save_model_path)

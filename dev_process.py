@@ -33,7 +33,7 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
         step_num = 0
         for index, data in enumerate(dev_loader_tqdm):
             texts_origin, bert_attention_mask, image_origin, text_image_mask, labels, \
-            texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _ = data
+            texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _, emoji_ids, hashtag_ids = data
             # continue
 
             if opt.cuda is True:
@@ -42,8 +42,10 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
                 image_origin = image_origin.cuda()
                 text_image_mask = text_image_mask.cuda()
                 labels = labels.cuda()
+                emoji_ids = emoji_ids.cuda()
+                hashtag_ids = hashtag_ids.cuda()
             orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin,
-                                       text_image_mask=text_image_mask)
+                                       text_image_mask=text_image_mask, emoji=emoji_ids, hashtag=hashtag_ids)
             origin_res = cl_model(orgin_param)
 
             loss = critertion(origin_res, labels) / opt.acc_batch_size
@@ -87,7 +89,6 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
             WriteFile(
                 opt.save_model_path, 'train_correct_log.txt', save_content + '\n', 'a+')
             # 运行测试集
-            test_process.test_process(opt, critertion, cl_model, test_loader, last_F1, log_summary_writer, train_log['epoch'])
 
             dev_log = {
                 "dev_accuracy": dev_accuracy,
@@ -102,6 +103,7 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
 
             last_Accuracy, is_save_model, model_name = compare_to_save(last_Accuracy, dev_accuracy, opt, cl_model, train_log, dev_log, 'Acc', opt.save_acc, add_enter=False)
             if is_save_model is True:
+                test_process.test_process(opt, critertion, cl_model, test_loader, last_F1, log_summary_writer, train_log['epoch'])
                 if opt.data_type == 'HFM':
                     last_F1, is_save_model, model_name = compare_to_save(last_F1, dev_F1, opt, cl_model, train_log, dev_log, 'F1-marco', opt.save_F1, 'F1-marco', model_name)
                 else:
@@ -109,6 +111,8 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
             else:
                 if opt.data_type == 'HFM':
                     last_F1, is_save_model, model_name = compare_to_save(last_F1, dev_F1, opt, cl_model, train_log, dev_log, 'F1-marco', opt.save_F1)
+                    if is_save_model:
+                        test_process.test_process(opt, critertion, cl_model, test_loader, last_F1, log_summary_writer, train_log['epoch'])
                 else:
                     last_F1, is_save_model, model_name = compare_to_save(last_F1, dev_F1_weighted, opt, cl_model, train_log, dev_log, 'F1', opt.save_F1)
 
