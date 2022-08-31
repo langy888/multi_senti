@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: fuyubo-hmf-bertcross-eh2
+  name: fuyubo-hmf-bertcross-it-ii-tt
 spec:
   restartPolicy: Never
   hostIPC: false
@@ -60,5 +60,5 @@ spec:
         - matchExpressions:
           - key: kubernetes.io/hostname
             operator: NotIn
-            values: [sh-idc1-10-5-8-49, sh-idc1-10-5-8-152,  sh-idc1-10-5-8-155, sh-idc1-10-5-8-151 ]
+            values: [sh-idc1-10-5-8-49] #sh-idc1-10-5-8-152,  sh-idc1-10-5-8-155, sh-idc1-10-5-8-151, sh-idc1-10-5-8-157 ]
 

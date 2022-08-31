@@ -75,7 +75,7 @@ if __name__ == '__main__':
     parse.add_argument('-data_type', type=str, default='MVSA-single',
                        help='Train data type: MVSA-single and MVSA-multiple and HFM')
     parse.add_argument('-max_token_length', type=int,
-                       default=77, help='the sentence\'s token length')
+                       default=200, help='the sentence\'s token length')
     parse.add_argument('-max_else_length', type=int,
                        default=12, help='the sentence\'s else length')
     parse.add_argument('-save_acc', type=float, default=-1, help='The default ACC threshold')
@@ -166,12 +166,12 @@ if __name__ == '__main__':
 
     if opt.data_type == 'HFM':
         data_path_root = abl_path + 'dataset/data/HFM/'
-        train_data_path = data_path_root + 'train_e.json'
-        dev_data_path = data_path_root + 'valid_e.json'
-        test_data_path = data_path_root + 'test_e.json'
+        train_data_path = data_path_root + 'train_e3.json'
+        dev_data_path = data_path_root + 'valid_e3.json'
+        test_data_path = data_path_root + 'test_e3.json'
         photo_path = data_path_root + '/dataset_image'
         image_coordinate = None
-        data_translation_path = data_path_root + '/HFM_e2.json'
+        data_translation_path = data_path_root + '/HFM_e3.json'
     else:
         data_path_root = abl_path + 'dataset/data/' + opt.data_type + '/' + opt.data_path_name + '/'
         train_data_path = data_path_root + 'train.json'

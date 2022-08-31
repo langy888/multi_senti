@@ -160,10 +160,10 @@ class Collate():
         for length, el, htl in zip(data_len, emoji_len, hashtag_len):
             text_mask_cell = [1] * length
             text_mask_cell.extend([0] * (max_len - length))
-            text_mask_cell.extend([1] * el)
-            text_mask_cell.extend([0] * (max_emoji_len - el))
-            text_mask_cell.extend([1] * htl)
-            text_mask_cell.extend([0] * (max_hashtag_len - htl))
+            #text_mask_cell.extend([1] * el)
+            #text_mask_cell.extend([0] * (max_emoji_len - el))
+            #text_mask_cell.extend([1] * htl)
+            #text_mask_cell.extend([0] * (max_hashtag_len - htl))
             bert_attention_mask.append(text_mask_cell[:])
 
             text_mask_cell.extend([1] * self.image_mask_num)
@@ -174,10 +174,10 @@ class Collate():
         for length, el, htl in zip(aug_data_len, emoji_len, hashtag_len):
             text_mask_cell = [1] * length
             text_mask_cell.extend([0] * (aug_max_len - length))
-            text_mask_cell.extend([1] * el)
-            text_mask_cell.extend([0] * (max_emoji_len - el))
-            text_mask_cell.extend([1] * htl)
-            text_mask_cell.extend([0] * (max_hashtag_len - htl))
+            #text_mask_cell.extend([1] * el)
+            #text_mask_cell.extend([0] * (max_emoji_len - el))
+            #text_mask_cell.extend([1] * htl)
+            #text_mask_cell.extend([0] * (max_hashtag_len - htl))
             tran_bert_attention_mask.append(text_mask_cell[:])
 
             text_mask_cell.extend([1] * self.image_mask_num)

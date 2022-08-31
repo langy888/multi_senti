@@ -30,9 +30,9 @@ image_model=resnet-50
 #simces_roberta_unsup
 cll=1
 cla=1
-it=0
-tt=0
-ii=0
+it=1
+tt=1
+ii=1
 
 run_type=1
 test_model_path=/output/checkpoint/

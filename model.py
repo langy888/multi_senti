@@ -265,7 +265,8 @@ class FuseModel(nn.Module):
         )
 
     def forward(self, text_inputs, bert_attention_mask, image_inputs, text_image_mask, emoji, hashtag):
-        text_inputs = torch.cat((text_inputs, hashtag, emoji), dim=1)
+        #text_inputs = torch.cat((text_inputs, hashtag, emoji), dim=1)
+        #text_inputs = torch.cat((text_inputs, emoji), dim=1)
         assert text_inputs.size(0) == bert_attention_mask.size(0)
         text_encoder = self.text_model(text_inputs, attention_mask=bert_attention_mask)
         text_cls = text_encoder.pooler_output # N * H
