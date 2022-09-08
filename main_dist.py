@@ -26,6 +26,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
+    parse.add_argument('-ff', default=0, type=int)
     parse.add_argument('-cll', default=0, type=int)
     parse.add_argument('-cla', default=0, type=int)
     parse.add_argument('-it', default=0, type=int)
