@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: fuyubo-hmf-bertcross-conatt-it-cll-ii-tt
+  name: fuyubo-hmf-bertcross-catt-oritran-cll-it-ff
 spec:
   restartPolicy: Never
   hostIPC: false

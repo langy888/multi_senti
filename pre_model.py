@@ -263,6 +263,9 @@ class RobertaSelfAttention(nn.Module):
 
         # Normalize the attention scores to probabilities.
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
+        if attention_probs.size(-1) != 50:
+            attention_probs = 1 - attention_probs + attention_mask   #contrastive attention
+            attention_probs = nn.Softmax(dim=-1)(attention_probs)   #contrastive attention
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
@@ -700,9 +703,9 @@ class BertCoAttention(nn.Module):
         # Normalize the attention scores to probabilities.
         # b*12*75*49
         attention_probs = nn.Softmax(dim=-1)(attention_scores)
-        if attention_probs.size(-1) != 50:
-            attention_probs = 1 - attention_probs + s2_attention_mask #contrastive attention
-            attention_probs = nn.Softmax(dim=-1)(attention_probs) #contrastive attention
+        # if attention_probs.size(-1) != 50:
+        #     attention_probs = 1 - attention_probs + s2_attention_mask #contrastive attention
+        #     attention_probs = nn.Softmax(dim=-1)(attention_probs) #contrastive attention
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
