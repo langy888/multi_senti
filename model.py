@@ -12,7 +12,7 @@ from transformers import BertConfig, BertForPreTraining, AutoTokenizer, AutoMode
     ViTConfig, ViTModel, ViTFeatureExtractor
 import math
 import matplotlib.pyplot as plt
-from pre_model import RobertaEncoder, BertCrossEncoder, BertPooler
+from pre_model import BertCrossEncoder
 import copy
 #os.environ['TORCH_HOME'] = '../../pretrained_model/input/' #setting the environment variable
 
@@ -201,25 +201,6 @@ class FuseModel(nn.Module):
         self.text_model = TextModel(opt)
         self.image_model = ImageModel(opt)
 
-        # self.text_config = copy.deepcopy(self.text_model.get_config())
-        # self.image_config = copy.deepcopy(self.text_model.get_config())
-
-        # self.text_config.num_attention_heads = opt.tran_dim // 64
-        # self.text_config.hidden_size = opt.tran_dim
-        # self.text_config.num_hidden_layers = opt.tran_num_layers
-
-        # self.image_config.num_attention_heads = opt.tran_dim // 64
-        # self.image_config.hidden_size = opt.tran_dim
-        # self.image_config.num_hidden_layers = opt.image_num_layers
-
-        # if self.text_config.is_decoder:
-        #     self.use_cache = self.text_config.use_cache
-        # else:
-        #     self.use_cache = False
-
-        # self.text_image_encoder = RobertaEncoder(self.text_config)
-        # self.image_encoder = RobertaEncoder(self.image_config)
-
         self.text_image_encoder = BertCrossEncoder(opt.tran_dim, 5)
         self.image_encoder = BertCrossEncoder(opt.tran_dim, 1)
 
@@ -248,6 +229,11 @@ class FuseModel(nn.Module):
         )
         self.fimage_cls_change = nn.Sequential(
             nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
+            ActivateFun(opt)
+        )
+
+        self.linear_output_change = nn.Sequential(
+            nn.Linear(self.text_model.get_output_dim()+self.image_model.get_output_dim()+opt.tran_dim, opt.tran_dim),
             ActivateFun(opt)
         )
 
@@ -299,21 +285,26 @@ class FuseModel(nn.Module):
         image_init = self.image_encoder(image_init, image_init, extended_attention_mask)
 
         ####非crossatt删掉
-        text_image_mask =  text_image_mask[:, :-image_init.size(1)]
+        text_mask =  text_image_mask[:, :-image_init.size(1)]
+        text_extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_mask, text_inputs.size())
 
-        #text_image_cat = torch.cat((text_init, image_init), dim=1)
+        text_image_cat = torch.cat((text_init, image_init), dim=1)
 
-        #extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
-        #text_image_output = self.text_image_encoder(text_image_cat, text_image_cat, extended_attention_mask)
-        text_image_output = self.text_image_encoder(text_init, image_init, extended_attention_mask)
+        extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
+        text_image_output = self.text_image_encoder(text_image_cat, text_image_cat, extended_attention_mask)
 
-        # fused_text_cls = text_image_output[:,0,:]
-        # fused_img_cls = text_image_output[:,-50,:]
+        text_image_clatt = self.text_image_encoder(image_init, text_init, text_extended_attention_mask, cl_att=1) # N, 50, 768
 
-        # fused_text_cls = self.ftext_cls_change(fused_text_cls)
-        # fused_img_cls = self.fimage_cls_change(fused_img_cls)
-        fused_text_cls = 0
-        fused_img_cls = 0
+        fused_text_cls = text_image_output[:,0,:]
+        fused_img_cls = text_image_output[:,-50,:]
+
+        fused_text_cls = self.ftext_cls_change(fused_text_cls)
+        fused_img_cls = self.fimage_cls_change(fused_img_cls)
+
+        text_image_output = text_image_output[:, :-image_init.size(1)]
+
+        #text_image_mask = torch.cat((text_image_mask,image_mask), dim=1)
+        text_image_output = torch.cat((text_image_output,text_image_clatt), dim=1)
 
         text_image_alpha = self.output_attention(text_image_output)
         text_image_alpha = text_image_alpha.squeeze(-1).masked_fill(text_image_mask == 0, -1e9)

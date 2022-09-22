@@ -167,7 +167,10 @@ if __name__ == '__main__':
 
     if opt.data_type == 'HFM':
         data_path_root = abl_path + 'dataset/data/HFM/'
-        train_data_path = data_path_root + 'train_e3.json'
+        if opt.debug:
+            train_data_path = data_path_root + 'valid_e3.json'
+        else:
+            train_data_path = data_path_root + 'train_e3.json'
         dev_data_path = data_path_root + 'valid_e3.json'
         test_data_path = data_path_root + 'test_e3.json'
         photo_path = data_path_root + '/dataset_image'
