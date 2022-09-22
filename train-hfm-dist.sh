@@ -13,7 +13,7 @@ fuse_type=att
 batch=128
 acc_grad=8
 tran_num_layers=5
-image_num_layers=1
+image_num_layers=6
 
 fixed_image_model=0
 no_extra_img_trans=0
