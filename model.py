@@ -298,16 +298,22 @@ class FuseModel(nn.Module):
 
         image_init = self.image_encoder(image_init, image_init, extended_attention_mask)
 
-        text_image_cat = torch.cat((text_init, image_init), dim=1)
+        ####非crossatt删掉
+        text_image_mask =  text_image_mask[:, :-image_init.size(1)]
 
-        extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
-        text_image_output = self.text_image_encoder(text_image_cat, text_image_cat, extended_attention_mask)
+        #text_image_cat = torch.cat((text_init, image_init), dim=1)
 
-        fused_text_cls = text_image_output[:,0,:]
-        fused_img_cls = text_image_output[:,-50,:]
+        #extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
+        #text_image_output = self.text_image_encoder(text_image_cat, text_image_cat, extended_attention_mask)
+        text_image_output = self.text_image_encoder(text_init, image_init, extended_attention_mask)
 
-        fused_text_cls = self.ftext_cls_change(fused_text_cls)
-        fused_img_cls = self.fimage_cls_change(fused_img_cls)
+        # fused_text_cls = text_image_output[:,0,:]
+        # fused_img_cls = text_image_output[:,-50,:]
+
+        # fused_text_cls = self.ftext_cls_change(fused_text_cls)
+        # fused_img_cls = self.fimage_cls_change(fused_img_cls)
+        fused_text_cls = 0
+        fused_img_cls = 0
 
         text_image_alpha = self.output_attention(text_image_output)
         text_image_alpha = text_image_alpha.squeeze(-1).masked_fill(text_image_mask == 0, -1e9)

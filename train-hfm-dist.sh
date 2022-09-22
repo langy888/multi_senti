@@ -29,8 +29,8 @@ image_model=resnet-50
 #simces_roberta_sup
 #simces_roberta_unsup
 cll=1
-cla=1
-it=0
+cla=0
+it=1
 tt=0
 ii=0
 ff=0
