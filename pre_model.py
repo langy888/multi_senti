@@ -18,611 +18,22 @@
 import math
 import copy
 
+from typing import Optional, List
+
+import torch.nn.functional as F
+from torch import nn, Tensor
+from torch.nn.parameter import Parameter
+
+import math
+
 import torch
 import torch.utils.checkpoint
-from packaging import version
-from torch import nn
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
-from transformers.activations import ACT2FN, gelu
-from transformers.file_utils import (
-    add_code_sample_docstrings,
-    add_start_docstrings,
-    add_start_docstrings_to_model_forward,
-    replace_return_docstrings,
-)
-from transformers.modeling_outputs import (
-    BaseModelOutputWithPastAndCrossAttentions,
-    BaseModelOutputWithPoolingAndCrossAttentions,
-    CausalLMOutputWithCrossAttentions,
-    MaskedLMOutput,
-    MultipleChoiceModelOutput,
-    QuestionAnsweringModelOutput,
-    SequenceClassifierOutput,
-    TokenClassifierOutput,
-)
-from transformers.modeling_utils import (
-    PreTrainedModel,
-    apply_chunking_to_forward,
-    find_pruneable_heads_and_indices,
-    prune_linear_layer,
-)
+from transformers.activations import gelu
+
 from transformers.utils import logging
-from transformers.models.roberta.configuration_roberta import RobertaConfig
-
 
 logger = logging.get_logger(__name__)
-
-_CHECKPOINT_FOR_DOC = "roberta-base"
-_CONFIG_FOR_DOC = "RobertaConfig"
-_TOKENIZER_FOR_DOC = "RobertaTokenizer"
-
-ROBERTA_PRETRAINED_MODEL_ARCHIVE_LIST = [
-    "roberta-base",
-    "roberta-large",
-    "roberta-large-mnli",
-    "distilroberta-base",
-    "roberta-base-openai-detector",
-    "roberta-large-openai-detector",
-    # See all RoBERTa models at https://huggingface.co/models?filter=roberta
-]
-
-
-# class RobertaEmbeddings(nn.Module):
-#     """
-#     Same as BertEmbeddings with a tiny tweak for positional embeddings indexing.
-#     """
-#
-#     # Copied from transformers.models.bert.modeling_bert.BertEmbeddings.__init__
-#     def __init__(self, config):
-#         super().__init__()
-#         self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
-#         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
-#         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
-#
-#         # self.LayerNorm is not snake-cased to stick with TensorFlow model variable name and be able to load
-#         # any TensorFlow checkpoint file
-#         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-#         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-#         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-#         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
-#         self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
-#         if version.parse(torch.__version__) > version.parse("1.6.0"):
-#             self.register_buffer(
-#                 "token_type_ids",
-#                 torch.zeros(self.position_ids.size(), dtype=torch.long, device=self.position_ids.device),
-#                 persistent=False,
-#             )
-#
-#         # End copy
-#         self.padding_idx = config.pad_token_id
-#         self.position_embeddings = nn.Embedding(
-#             config.max_position_embeddings, config.hidden_size, padding_idx=self.padding_idx
-#         )
-#
-#     def forward(
-#         self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None, past_key_values_length=0
-#     ):
-#         if position_ids is None:
-#             if input_ids is not None:
-#                 # Create the position ids from the input token ids. Any padded tokens remain padded.
-#                 position_ids = create_position_ids_from_input_ids(input_ids, self.padding_idx, past_key_values_length)
-#             else:
-#                 position_ids = self.create_position_ids_from_inputs_embeds(inputs_embeds)
-#
-#         if input_ids is not None:
-#             input_shape = input_ids.size()
-#         else:
-#             input_shape = inputs_embeds.size()[:-1]
-#
-#         seq_length = input_shape[1]
-#
-#         # Setting the token_type_ids to the registered buffer in constructor where it is all zeros, which usually occurs
-#         # when its auto-generated, registered buffer helps users when tracing the model without passing token_type_ids, solves
-#         # issue #5664
-#         if token_type_ids is None:
-#             if hasattr(self, "token_type_ids"):
-#                 buffered_token_type_ids = self.token_type_ids[:, :seq_length]
-#                 buffered_token_type_ids_expanded = buffered_token_type_ids.expand(input_shape[0], seq_length)
-#                 token_type_ids = buffered_token_type_ids_expanded
-#             else:
-#                 token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
-#
-#         if inputs_embeds is None:
-#             inputs_embeds = self.word_embeddings(input_ids)
-#         token_type_embeddings = self.token_type_embeddings(token_type_ids)
-#
-#         embeddings = inputs_embeds + token_type_embeddings
-#         if self.position_embedding_type == "absolute":
-#             position_embeddings = self.position_embeddings(position_ids)
-#             embeddings += position_embeddings
-#         embeddings = self.LayerNorm(embeddings)
-#         embeddings = self.dropout(embeddings)
-#         return embeddings
-#
-#     def create_position_ids_from_inputs_embeds(self, inputs_embeds):
-#         """
-#         We are provided embeddings directly. We cannot infer which are padded so just generate sequential position ids.
-#
-#         Args:
-#             inputs_embeds: torch.Tensor
-#
-#         Returns: torch.Tensor
-#         """
-#         input_shape = inputs_embeds.size()[:-1]
-#         sequence_length = input_shape[1]
-#
-#         position_ids = torch.arange(
-#             self.padding_idx + 1, sequence_length + self.padding_idx + 1, dtype=torch.long, device=inputs_embeds.device
-#         )
-#         return position_ids.unsqueeze(0).expand(input_shape)
-
-
-# Copied from transformers.models.bert.modeling_bert.BertSelfAttention with Bert->Roberta
-
-class RobertaSelfAttention(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
-            raise ValueError(
-                f"The hidden size ({config.hidden_size}) is not a multiple of the number of attention "
-                f"heads ({config.num_attention_heads})"
-            )
-
-        self.num_attention_heads = config.num_attention_heads
-        self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
-        self.all_head_size = self.num_attention_heads * self.attention_head_size
-
-        self.query = nn.Linear(config.hidden_size, self.all_head_size)
-        self.key = nn.Linear(config.hidden_size, self.all_head_size)
-        self.value = nn.Linear(config.hidden_size, self.all_head_size)
-
-        self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
-        self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
-        if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
-            self.max_position_embeddings = config.max_position_embeddings
-            self.distance_embedding = nn.Embedding(2 * config.max_position_embeddings - 1, self.attention_head_size)
-
-        self.is_decoder = config.is_decoder
-
-    def transpose_for_scores(self, x):
-        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
-        x = x.view(*new_x_shape)
-        return x.permute(0, 2, 1, 3)
-
-    def forward(
-        self,
-        hidden_states,
-        attention_mask=None,
-        head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-        past_key_value=None,
-        output_attentions=False,
-    ):
-        mixed_query_layer = self.query(hidden_states)
-
-        # If this is instantiated as a cross-attention module, the keys
-        # and values come from an encoder; the attention mask needs to be
-        # such that the encoder's padding tokens are not attended to.
-        is_cross_attention = encoder_hidden_states is not None
-
-        if is_cross_attention and past_key_value is not None:
-            # reuse k,v, cross_attentions
-            key_layer = past_key_value[0]
-            value_layer = past_key_value[1]
-            attention_mask = encoder_attention_mask
-        elif is_cross_attention:
-            key_layer = self.transpose_for_scores(self.key(encoder_hidden_states))
-            value_layer = self.transpose_for_scores(self.value(encoder_hidden_states))
-            attention_mask = encoder_attention_mask
-        elif past_key_value is not None:
-            key_layer = self.transpose_for_scores(self.key(hidden_states))
-            value_layer = self.transpose_for_scores(self.value(hidden_states))
-            key_layer = torch.cat([past_key_value[0], key_layer], dim=2)
-            value_layer = torch.cat([past_key_value[1], value_layer], dim=2)
-        else:
-            key_layer = self.transpose_for_scores(self.key(hidden_states))
-            value_layer = self.transpose_for_scores(self.value(hidden_states))
-
-        query_layer = self.transpose_for_scores(mixed_query_layer)
-
-        if self.is_decoder:
-            # if cross_attention save Tuple(torch.Tensor, torch.Tensor) of all cross attention key/value_states.
-            # Further calls to cross_attention layer can then reuse all cross-attention
-            # key/value_states (first "if" case)
-            # if uni-directional self-attention (decoder) save Tuple(torch.Tensor, torch.Tensor) of
-            # all previous decoder key/value_states. Further calls to uni-directional self-attention
-            # can concat previous decoder key/value_states to current projected key/value_states (third "elif" case)
-            # if encoder bi-directional self-attention `past_key_value` is always `None`
-            past_key_value = (key_layer, value_layer)
-
-        # Take the dot product between "query" and "key" to get the raw attention scores.
-        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
-
-        if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
-            seq_length = hidden_states.size()[1]
-            position_ids_l = torch.arange(seq_length, dtype=torch.long, device=hidden_states.device).view(-1, 1)
-            position_ids_r = torch.arange(seq_length, dtype=torch.long, device=hidden_states.device).view(1, -1)
-            distance = position_ids_l - position_ids_r
-            positional_embedding = self.distance_embedding(distance + self.max_position_embeddings - 1)
-            positional_embedding = positional_embedding.to(dtype=query_layer.dtype)  # fp16 compatibility
-
-            if self.position_embedding_type == "relative_key":
-                relative_position_scores = torch.einsum("bhld,lrd->bhlr", query_layer, positional_embedding)
-                attention_scores = attention_scores + relative_position_scores
-            elif self.position_embedding_type == "relative_key_query":
-                relative_position_scores_query = torch.einsum("bhld,lrd->bhlr", query_layer, positional_embedding)
-                relative_position_scores_key = torch.einsum("bhrd,lrd->bhlr", key_layer, positional_embedding)
-                attention_scores = attention_scores + relative_position_scores_query + relative_position_scores_key
-
-        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        if attention_mask is not None:
-            # Apply the attention mask is (precomputed for all layers in RobertaModel forward() function)
-            attention_scores = attention_scores + attention_mask
-
-        # Normalize the attention scores to probabilities.
-        attention_probs = nn.Softmax(dim=-1)(attention_scores)
-
-        # This is actually dropping out entire tokens to attend to, which might
-        # seem a bit unusual, but is taken from the original Transformer paper.
-        attention_probs = self.dropout(attention_probs)
-
-        # Mask heads if we want to
-        if head_mask is not None:
-            attention_probs = attention_probs * head_mask
-
-        context_layer = torch.matmul(attention_probs, value_layer)
-
-        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
-        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
-        context_layer = context_layer.view(*new_context_layer_shape)
-
-        outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
-
-        if self.is_decoder:
-            outputs = outputs + (past_key_value,)
-        return outputs
-
-
-# Copied from transformers.models.bert.modeling_bert.BertSelfOutput
-class RobertaSelfOutput(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.dense = nn.Linear(config.hidden_size, config.hidden_size)
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
-
-    def forward(self, hidden_states, input_tensor):
-        hidden_states = self.dense(hidden_states)
-        hidden_states = self.dropout(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states + input_tensor)
-        return hidden_states
-
-
-# Copied from transformers.models.bert.modeling_bert.BertAttention with Bert->Roberta
-class RobertaAttention(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.self = RobertaSelfAttention(config)
-        self.output = RobertaSelfOutput(config)
-        self.pruned_heads = set()
-
-    def prune_heads(self, heads):
-        if len(heads) == 0:
-            return
-        heads, index = find_pruneable_heads_and_indices(
-            heads, self.self.num_attention_heads, self.self.attention_head_size, self.pruned_heads
-        )
-
-        # Prune linear layers
-        self.self.query = prune_linear_layer(self.self.query, index)
-        self.self.key = prune_linear_layer(self.self.key, index)
-        self.self.value = prune_linear_layer(self.self.value, index)
-        self.output.dense = prune_linear_layer(self.output.dense, index, dim=1)
-
-        # Update hyper params and store pruned heads
-        self.self.num_attention_heads = self.self.num_attention_heads - len(heads)
-        self.self.all_head_size = self.self.attention_head_size * self.self.num_attention_heads
-        self.pruned_heads = self.pruned_heads.union(heads)
-
-    def forward(
-        self,
-        hidden_states,
-        attention_mask=None,
-        head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-        past_key_value=None,
-        output_attentions=False,
-    ):
-        self_outputs = self.self(
-            hidden_states,
-            attention_mask,
-            head_mask,
-            encoder_hidden_states,
-            encoder_attention_mask,
-            past_key_value,
-            output_attentions,
-        )
-        attention_output = self.output(self_outputs[0], hidden_states)
-        outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
-        return outputs
-
-
-# Copied from transformers.models.bert.modeling_bert.BertIntermediate
-class RobertaIntermediate(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
-        if isinstance(config.hidden_act, str):
-            self.intermediate_act_fn = ACT2FN[config.hidden_act]
-        else:
-            self.intermediate_act_fn = config.hidden_act
-
-    def forward(self, hidden_states):
-        hidden_states = self.dense(hidden_states)
-        hidden_states = self.intermediate_act_fn(hidden_states)
-        return hidden_states
-
-
-# Copied from transformers.models.bert.modeling_bert.BertOutput
-class RobertaOutput(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.dense = nn.Linear(config.intermediate_size, config.hidden_size)
-        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
-
-    def forward(self, hidden_states, input_tensor):
-        hidden_states = self.dense(hidden_states)
-        hidden_states = self.dropout(hidden_states)
-        hidden_states = self.LayerNorm(hidden_states + input_tensor)
-        return hidden_states
-
-
-# Copied from transformers.models.bert.modeling_bert.BertLayer with Bert->Roberta
-class RobertaLayer(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.chunk_size_feed_forward = config.chunk_size_feed_forward
-        self.seq_len_dim = 1
-        self.attention = RobertaAttention(config)
-        self.is_decoder = config.is_decoder
-        self.add_cross_attention = config.add_cross_attention
-        if self.add_cross_attention:
-            assert self.is_decoder, f"{self} should be used as a decoder model if cross attention is added"
-            self.crossattention = RobertaAttention(config)
-        self.intermediate = RobertaIntermediate(config)
-        self.output = RobertaOutput(config)
-
-    def forward(
-        self,
-        hidden_states,
-        attention_mask=None,
-        head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-        past_key_value=None,
-        output_attentions=False,
-    ):
-        # decoder uni-directional self-attention cached key/values tuple is at positions 1,2
-        self_attn_past_key_value = past_key_value[:2] if past_key_value is not None else None
-        self_attention_outputs = self.attention(
-            hidden_states,
-            attention_mask,
-            head_mask,
-            output_attentions=output_attentions,
-            past_key_value=self_attn_past_key_value,
-        )
-        attention_output = self_attention_outputs[0]
-
-        # if decoder, the last output is tuple of self-attn cache
-        if self.is_decoder:
-            outputs = self_attention_outputs[1:-1]
-            present_key_value = self_attention_outputs[-1]
-        else:
-            outputs = self_attention_outputs[1:]  # add self attentions if we output attention weights
-
-        cross_attn_present_key_value = None
-        if self.is_decoder and encoder_hidden_states is not None:
-            assert hasattr(
-                self, "crossattention"
-            ), f"If `encoder_hidden_states` are passed, {self} has to be instantiated with cross-attention layers by setting `config.add_cross_attention=True`"
-
-            # cross_attn cached key/values tuple is at positions 3,4 of past_key_value tuple
-            cross_attn_past_key_value = past_key_value[-2:] if past_key_value is not None else None
-            cross_attention_outputs = self.crossattention(
-                attention_output,
-                attention_mask,
-                head_mask,
-                encoder_hidden_states,
-                encoder_attention_mask,
-                cross_attn_past_key_value,
-                output_attentions,
-            )
-            attention_output = cross_attention_outputs[0]
-            outputs = outputs + cross_attention_outputs[1:-1]  # add cross attentions if we output attention weights
-
-            # add cross-attn cache to positions 3,4 of present_key_value tuple
-            cross_attn_present_key_value = cross_attention_outputs[-1]
-            present_key_value = present_key_value + cross_attn_present_key_value
-
-        layer_output = apply_chunking_to_forward(
-            self.feed_forward_chunk, self.chunk_size_feed_forward, self.seq_len_dim, attention_output
-        )
-        outputs = (layer_output,) + outputs
-
-        # if decoder, return the attn key/values as the last output
-        if self.is_decoder:
-            outputs = outputs + (present_key_value,)
-
-        return outputs
-
-    def feed_forward_chunk(self, attention_output):
-        intermediate_output = self.intermediate(attention_output)
-        layer_output = self.output(intermediate_output, attention_output)
-        return layer_output
-
-
-# Copied from transformers.models.bert.modeling_bert.BertEncoder with Bert->Roberta
-class RobertaEncoder(nn.Module):
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
-        self.layer = nn.ModuleList([RobertaLayer(config) for _ in range(config.num_hidden_layers)])
-
-    def forward(
-        self,
-        hidden_states,
-        attention_mask=None,
-        head_mask=None,
-        encoder_hidden_states=None,
-        encoder_attention_mask=None,
-        past_key_values=None,
-        use_cache=None,
-        output_attentions=False,
-        output_hidden_states=False,
-        return_dict=True,
-    ):
-        all_hidden_states = () if output_hidden_states else None
-        all_self_attentions = () if output_attentions else None
-        all_cross_attentions = () if output_attentions and self.config.add_cross_attention else None
-
-        next_decoder_cache = () if use_cache else None
-        for i, layer_module in enumerate(self.layer):
-            if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
-
-            layer_head_mask = head_mask[i] if head_mask is not None else None
-            past_key_value = past_key_values[i] if past_key_values is not None else None
-
-            if getattr(self.config, "gradient_checkpointing", False) and self.training:
-
-                if use_cache:
-                    logger.warning(
-                        "`use_cache=True` is incompatible with `config.gradient_checkpointing=True`. Setting "
-                        "`use_cache=False`..."
-                    )
-                    use_cache = False
-
-                def create_custom_forward(module):
-                    def custom_forward(*inputs):
-                        return module(*inputs, past_key_value, output_attentions)
-
-                    return custom_forward
-
-                layer_outputs = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(layer_module),
-                    hidden_states,
-                    attention_mask,
-                    layer_head_mask,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                )
-            else:
-                layer_outputs = layer_module(
-                    hidden_states,
-                    attention_mask,
-                    layer_head_mask,
-                    encoder_hidden_states,
-                    encoder_attention_mask,
-                    past_key_value,
-                    output_attentions,
-                )
-
-            hidden_states = layer_outputs[0]
-            if use_cache:
-                next_decoder_cache += (layer_outputs[-1],)
-            if output_attentions:
-                all_self_attentions = all_self_attentions + (layer_outputs[1],)
-                if self.config.add_cross_attention:
-                    all_cross_attentions = all_cross_attentions + (layer_outputs[2],)
-
-        if output_hidden_states:
-            all_hidden_states = all_hidden_states + (hidden_states,)
-
-        if not return_dict:
-            return tuple(
-                v
-                for v in [
-                    hidden_states,
-                    next_decoder_cache,
-                    all_hidden_states,
-                    all_self_attentions,
-                    all_cross_attentions,
-                ]
-                if v is not None
-            )
-        return BaseModelOutputWithPastAndCrossAttentions(
-            last_hidden_state=hidden_states,
-            past_key_values=next_decoder_cache,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
-            cross_attentions=all_cross_attentions,
-        )
-
-
-    def get_extended_attention_mask(self, attention_mask, input_shape, device):
-        """
-        Makes broadcastable attention and causal masks so that future and masked tokens are ignored.
-
-        Arguments:
-            attention_mask (:obj:`torch.Tensor`):
-                Mask with ones indicating tokens to attend to, zeros for tokens to ignore.
-            input_shape (:obj:`Tuple[int]`):
-                The shape of the input to the model.
-            device: (:obj:`torch.device`):
-                The device of the input to the model.
-
-        Returns:
-            :obj:`torch.Tensor` The extended attention mask, with a the same dtype as :obj:`attention_mask.dtype`.
-        """
-        # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
-        # ourselves in which case we just need to make it broadcastable to all heads.
-        if attention_mask.dim() == 3:
-            extended_attention_mask = attention_mask[:, None, :, :]
-        elif attention_mask.dim() == 2:
-            # Provided a padding mask of dimensions [batch_size, seq_length]
-            # - if the model is a decoder, apply a causal mask in addition to the padding mask
-            # - if the model is an encoder, make the mask broadcastable to [batch_size, num_heads, seq_length, seq_length]
-
-            # if self.config.is_decoder:
-            #     batch_size, seq_length = input_shape
-            #     seq_ids = torch.arange(seq_length, device=device)
-            #     causal_mask = seq_ids[None, None, :].repeat(batch_size, seq_length, 1) <= seq_ids[None, :, None]
-            #     # in case past_key_values are used we need to add a prefix ones mask to the causal mask
-            #     # causal and attention masks must have same type with pytorch version < 1.3
-            #     causal_mask = causal_mask.to(attention_mask.dtype)
-            #
-            #     if causal_mask.shape[1] < attention_mask.shape[1]:
-            #         prefix_seq_len = attention_mask.shape[1] - causal_mask.shape[1]
-            #         causal_mask = torch.cat(
-            #             [
-            #                 torch.ones(
-            #                     (batch_size, seq_length, prefix_seq_len), device=device, dtype=causal_mask.dtype
-            #                 ),
-            #                 causal_mask,
-            #             ],
-            #             axis=-1,
-            #         )
-            #
-            #     extended_attention_mask = causal_mask[:, None, :, :] * attention_mask[:, None, None, :]
-            # else:
-            extended_attention_mask = attention_mask[:, None, None, :]
-        else:
-            raise ValueError(
-                f"Wrong shape for input_ids (shape {input_shape}) or attention_mask (shape {attention_mask.shape})"
-            )
-
-        # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
-        # masked positions, this operation will create a tensor which is 0.0 for
-        # positions we want to attend and -10000.0 for masked positions.
-        # Since we are adding it to the raw scores before the softmax, this is
-        # effectively the same as removing these entirely.
-        extended_attention_mask = extended_attention_mask.to(dtype=torch.float32)  # fp16 compatibility
-        extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-        return extended_attention_mask
 
 class BertPooler(nn.Module):
     def __init__(self, bert_dim):
@@ -786,3 +197,383 @@ class BertCrossEncoder(nn.Module):
         for layer_module in self.layer:
             s1_hidden_states = layer_module(s1_hidden_states, s2_hidden_states, s2_attention_mask)
         return s1_hidden_states
+
+
+class vg_decoder_wrapper(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        args = cfg.copy()
+        decoder_type= args.pop('type')
+        self.decoder = _MODULES[decoder_type](**args)
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+
+    def forward(self, img_feat, mask, pos_embed, word_feat, word_mask):
+        hs = self.decoder(img_feat, mask, pos_embed,
+                          word_feat, word_mask)
+        return hs.transpose(1, 2)
+
+
+class MultiStageDecoderLayer(nn.Module):
+    def __init__(self, d_model, dim_feedforward=2048, dropout=0.1,
+                 word_attn_args=None, img_attn_args=None, img_feat_chunk_num=2):
+        super().__init__()
+        args = word_attn_args.copy()
+        self.word_attn = MULTIHEAD_ATTNS[args.pop('type')](**args)
+        args = img_attn_args.copy()
+        self.img_attn = MULTIHEAD_ATTNS[args.pop('type')](**args)
+        # Implementation of Feedforward model
+        self.ffn = nn.Sequential(nn.Linear(d_model, dim_feedforward),
+                                 nn.ReLU(inplace=True),
+                                 nn.Dropout(dropout),
+                                 nn.Linear(dim_feedforward, d_model))
+
+        self.norm = _get_clones(nn.LayerNorm(d_model), 3)
+        self.dropout = _get_clones(nn.Dropout(dropout), 3)
+
+        self.img_feat_chunk_num = img_feat_chunk_num
+
+    def with_pos_embed(self, tensor, pos: Optional[Tensor]):
+        return tensor if pos is None else tensor + pos
+
+    def forward(self, vis_query, vis_query_pos, text_query_pos,
+                img_feat=None, img_key_padding_mask=None, img_pos=None,
+                word_feat=None, word_key_padding_mask=None, word_pos=None, layer_idx=None):
+
+        if self.img_feat_chunk_num > 1:
+            img_feat_srcs = img_feat.chunk(self.img_feat_chunk_num, dim=-1)
+            img_feat_k = img_feat_srcs[1]
+            img_feat_v = img_feat_srcs[0]
+        else:
+            img_feat_k = img_feat_v = img_feat
+
+        # Aggregate linguistic info about the object
+        text_info = self.word_attn(query=self.with_pos_embed(vis_query, vis_query_pos),
+                                   key=self.with_pos_embed(word_feat, word_pos),
+                                   value=word_feat, key_padding_mask=word_key_padding_mask)[0]
+        text_query = self.norm[0](self.dropout[0](text_info))
+
+        # Gather visual feats based on the linguistic info
+        vis_info = self.img_attn(query=self.with_pos_embed(text_query, text_query_pos),
+                                 key=self.with_pos_embed(img_feat_k, img_pos),
+                                 value=img_feat_v, key_padding_mask=img_key_padding_mask)[0]
+
+        vis_query = self.norm[1](vis_query + self.dropout[1](vis_info))
+        vis_query = self.norm[2](vis_query + self.dropout[2](self.ffn(vis_query)))
+
+        return vis_query
+
+
+class DecoderWithExtraEncoder(nn.Module):
+    def __init__(self, num_queries, query_dim,
+                 layer, num_layers, norm_dim, return_intermediate=False,
+                 extra_layer=None, num_extra_layers=1):
+        super().__init__()
+
+        args = extra_layer.copy()
+        layer_type = args.pop('type')
+        extra_encoder_layer = _MODULES[layer_type](**args)
+        self.extra_encoder_layers = _get_clones(extra_encoder_layer, num_extra_layers)
+
+        args = layer.copy()
+        layer_type = args.pop('type')
+        decoder_layer = _MODULES[layer_type](**args)
+        self.layers = _get_clones(decoder_layer, num_layers)
+
+        self.norm = nn.LayerNorm(norm_dim)
+        self.return_intermediate = return_intermediate
+        self.vis_query_embed = nn.Embedding(num_queries, query_dim)
+        self.text_query_embed = nn.Embedding(num_queries, query_dim)
+
+    def with_pos_embed(self, tensor, pos: Optional[Tensor]):
+        return tensor if pos is None else tensor + pos
+
+    def forward(self, img_feat, img_key_padding_mask=None, pos=None,
+                word_feat=None, word_key_padding_mask=None):
+
+        intermediate = []
+        hw, bs, c = img_feat.shape
+
+        # Encode discriminative features
+        for layer in self.extra_encoder_layers:
+            img_feat = layer(img_feat, img_key_padding_mask, pos,
+                             word_feat, word_key_padding_mask, None)
+
+
+        vis_query_embed = self.vis_query_embed.weight.unsqueeze(1).repeat(1, bs, 1)
+        text_query_embed = self.text_query_embed.weight.unsqueeze(1).repeat(1, bs, 1)
+
+        # Initial target query
+        vis_query = torch.zeros_like(vis_query_embed)
+
+        # Multi-stage decoder
+        for idx, layer in enumerate(self.layers):
+            vis_query = layer(vis_query, vis_query_embed, text_query_embed,
+                              img_feat, img_key_padding_mask, pos,
+                              word_feat, word_key_padding_mask, None, idx)
+            if self.return_intermediate:
+                intermediate.append(self.norm(vis_query))
+
+
+        output = vis_query
+        if self.norm is not None:
+            output = self.norm(output)
+            if self.return_intermediate:
+                intermediate.pop()
+                intermediate.append(output)
+
+        if self.return_intermediate:
+            return torch.stack(intermediate)
+
+        return output.unsqueeze(0)
+
+
+class DiscriminativeFeatEncLayer(nn.Module):
+    def __init__(self, d_model, img2text_attn_args=None, img_query_with_pos=True,
+                 img2textcond_attn_args=None, img2img_attn_args=None, vl_verify=None):
+        super().__init__()
+        args = img2text_attn_args.copy()
+        self.img2text_attn = MULTIHEAD_ATTNS[args.pop('type')](**args)
+        self.img_query_with_pos = img_query_with_pos
+
+        self.text_proj = MLP(**vl_verify['text_proj'])
+        self.img_proj = MLP(**vl_verify['img_proj'])
+        self.tf_pow = vl_verify.get('pow')
+        self.tf_scale = Parameter(torch.Tensor([vl_verify.get('scale')]))
+        self.tf_sigma = Parameter(torch.Tensor([vl_verify.get('sigma')]))
+
+        args = img2textcond_attn_args.copy()
+        self.img2textcond_attn = MULTIHEAD_ATTNS[args.pop('type')](**args)
+
+        args = img2img_attn_args.copy()
+        self.img2img_attn = MULTIHEAD_ATTNS[args.pop('type')](**args)
+
+        self.norm_text_cond_img = nn.LayerNorm(d_model)
+        self.norm_img = nn.LayerNorm(d_model)
+
+    def with_pos_embed(self, tensor, pos):
+        return tensor if pos is None else tensor + pos
+
+    def forward(self, img_feat, img_key_padding_mask, img_pos,
+                word_feat, word_key_padding_mask, word_pos=None):
+        orig_img_feat = img_feat
+
+        # visual-linguistic verification
+        img_query = img_feat + img_pos if self.img_query_with_pos else img_feat
+        text_info = self.img2text_attn(
+            query=img_query, key=self.with_pos_embed(word_feat, word_pos),
+            value=word_feat, key_padding_mask=word_key_padding_mask)[0]
+
+        text_embed = self.text_proj(text_info)
+        img_embed = self.img_proj(img_feat)
+        verify_score = (F.normalize(img_embed, p=2, dim=-1) *
+                        F.normalize(text_embed, p=2, dim=-1)).sum(dim=-1, keepdim=True)
+        verify_score = self.tf_scale * \
+                       torch.exp( - (1 - verify_score).pow(self.tf_pow) \
+                        / (2 * self.tf_sigma**2))
+
+        # language-guided context encoder
+        text_cond_info = self.img2textcond_attn(
+            query=img_feat, key=self.with_pos_embed(word_feat, word_pos),
+            value=word_feat, key_padding_mask=word_key_padding_mask)[0]
+
+        q = k = img_feat + text_cond_info
+        text_cond_img_ctx = self.img2img_attn(
+            query=q, key=k, value=img_feat, key_padding_mask=img_key_padding_mask)[0]
+
+        # discriminative feature
+        fuse_img_feat = (self.norm_img(img_feat) +
+                         self.norm_text_cond_img(text_cond_img_ctx)) * verify_score
+
+        return torch.cat([orig_img_feat, fuse_img_feat], dim=-1)
+
+
+
+
+_MODULES = {
+    'DecoderWithExtraEncoder': DecoderWithExtraEncoder,
+    'MultiStageDecoderLayer': MultiStageDecoderLayer,
+    'DiscriminativeFeatEncLayer': DiscriminativeFeatEncLayer,
+}
+
+def build_vg_decoder(args):
+    return vg_decoder_wrapper(args.model_config['decoder'])
+
+
+
+
+def _get_clones(module, N):
+    return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
+
+def _get_activation_fn(activation):
+    """Return an activation function given a string"""
+    if activation == "relu_inplace":
+        return nn.ReLU(inplace=True)
+    if activation == "relu":
+        return F.relu
+    if activation == "gelu":
+        return F.gelu
+    if activation == "glu":
+        return F.glu
+    raise RuntimeError(F"activation should be relu/gelu, not {activation}.")
+
+
+class MHAttentionRPE(nn.Module):
+    ''' With relative position embedding '''
+    def __init__(self, d_model, h, dropout=0.1, return_raw_attention=False,
+                 pos_x_range=[-20, 20], pos_y_range=[-20, 20], pos_index_offset=20,
+                 learnable_pos_embed=False):
+        super().__init__()
+        self.d_k = d_model // h
+        self.h = h
+        self.scaling = float(self.d_k) ** -0.5
+        self.return_raw_attention = return_raw_attention
+
+        self.in_proj_weight = Parameter(torch.Tensor(3 * d_model, d_model))
+        self.in_proj_bias = Parameter(torch.empty(3 * d_model))
+        self.out_proj = nn.Linear(d_model, d_model, bias=True)
+
+        self.attn = None
+        # self.dropout = nn.Dropout(p=dropout)
+        self.dropout_p = dropout
+        self._reset_parameters()
+
+        self.learnable_pos_embed = learnable_pos_embed
+        if learnable_pos_embed:
+            self.pos_x = nn.Embedding(pos_x_range[1] - pos_x_range[0] + 1, d_model // 2)
+            self.pos_y = nn.Embedding(pos_y_range[1] - pos_y_range[0] + 1, d_model // 2)
+        else:
+            pos_x, pos_y = position_embedding_sine(d_model // 2, normalize=True,
+                                                   x_range=pos_x_range, y_range=pos_y_range)
+            self.register_buffer('pos_x', pos_x) # [x_range, C]
+            self.register_buffer('pos_y', pos_y) # [y_range, C]
+
+        self.pos_index_offset = pos_index_offset
+
+    def _reset_parameters(self):
+        nn.init.xavier_uniform_(self.in_proj_weight)
+        nn.init.constant_(self.in_proj_bias, 0.)
+        nn.init.constant_(self.out_proj.bias, 0.)
+
+
+    def forward(self, query, key, value, key_padding_mask=None):
+        tgt_len, bs, dim = query.size()
+        src_len, _, dim = key.size()
+
+        weight_q, bias_q = self.in_proj_weight[0:dim], self.in_proj_bias[0:dim]
+        weight_k, bias_k = self.in_proj_weight[dim:dim*2], self.in_proj_bias[dim:dim*2]
+        weight_v, bias_v = self.in_proj_weight[dim*2:], self.in_proj_bias[dim*2:]
+
+        q = query.matmul(weight_q.t()) + bias_q
+        k = key.matmul(weight_k.t()) + bias_k
+        v = value.matmul(weight_v.t()) + bias_v
+
+        q = q.view(tgt_len, bs * self.h, -1).transpose(0, 1)  # [bs*h, tgt_len, dim//h]
+        k = k.view(src_len, bs * self.h, -1).permute(1, 2, 0)  # [bs*h, dim//h, src_len], To calculate qTk (bmm)
+        v = v.view(src_len, bs * self.h, -1).transpose(0, 1)
+
+        q = q * self.scaling
+        attn_weights = torch.bmm(q, k)  # [bs*h, tgt_len, src_len]
+
+        ### compute the relative positions
+        bs, HW = key_padding_mask.size()
+        assert (HW == 400) and (HW == tgt_len)
+        img_mask = ~key_padding_mask.view(bs, 20, 20)
+        yy = img_mask.cumsum(1, dtype=torch.float32).view(bs, -1)  # [bs, HW],  1~20
+        xx = img_mask.cumsum(2, dtype=torch.float32).view(bs, -1)  # [bs, HW],  1~20
+        diff_yy = yy[:, :, None] - yy[:, None, :]  # [bs, HW, HW]
+        diff_xx = xx[:, :, None] - xx[:, None, :]  # [bs, HW, HW]
+        if self.learnable_pos_embed:
+            k_posy = self.pos_y.weight.matmul(weight_k.t()[:dim//2])  # [x_range, dim]
+            k_posx = self.pos_x.weight.matmul(weight_k.t()[dim//2:])  # [y_range, dim]
+        else:
+            k_posy = self.pos_y.matmul(weight_k.t()[:dim//2])  # [x_range, dim]
+            k_posx = self.pos_x.matmul(weight_k.t()[dim//2:])  # [y_range, dim]
+        k_posy = k_posy.view(-1, 1, self.h, dim//self.h).repeat(1, bs, 1, 1).\
+                        reshape(-1, bs * self.h, dim//self.h).permute(1, 2, 0)  # [bs*h, dim//h, y_range]
+        k_posx = k_posx.view(-1, 1, self.h, dim//self.h).repeat(1, bs, 1, 1).\
+                        reshape(-1, bs * self.h, dim//self.h).permute(1, 2, 0)  # [bs*h, dim//h, x_range]
+        posy_attn_weights = torch.bmm(q, k_posy).view(bs, self.h, HW, -1)  # [bs, h, HW, y_range]
+        posx_attn_weights = torch.bmm(q, k_posx).view(bs, self.h, HW, -1) # [bs, h, HW, x_range]
+        diff_yy_idx = diff_yy[:, None].repeat(1, self.h, 1, 1) + self.pos_index_offset
+        diff_xx_idx = diff_xx[:, None].repeat(1, self.h, 1, 1) + self.pos_index_offset
+
+        posy_attn_weights = torch.gather(posy_attn_weights, -1, diff_yy_idx.long()) # [bs, h, HW, HW]
+        posx_attn_weights = torch.gather(posx_attn_weights, -1, diff_xx_idx.long())  # [bs, h, HW, HW]
+        pos_attn_weights = (posy_attn_weights + posx_attn_weights).view(bs*self.h, HW, -1)
+        attn_weights = attn_weights + pos_attn_weights
+
+
+        if key_padding_mask is not None:
+            attn_weights = attn_weights.view(-1, self.h, tgt_len, src_len)
+            attn_weights = attn_weights.masked_fill(
+                key_padding_mask.unsqueeze(1).unsqueeze(2),  # [bs, 1, 1, src_len]
+                float('-inf')
+            )
+            attn_weights = attn_weights.view(-1, tgt_len, src_len)
+        raw_attn_weights = attn_weights
+        attn_weights = attn_weights.softmax(dim=-1)
+        attn_weights = F.dropout(attn_weights, p=self.dropout_p, training=self.training)
+        attn_output = torch.bmm(attn_weights, v)
+        self.attn = attn_weights
+
+        attn_output = attn_output.transpose(0, 1).contiguous().view(tgt_len, bs, -1)
+        attn_output = F.linear(attn_output, self.out_proj.weight, self.out_proj.bias)
+        if self.return_raw_attention:
+            return attn_output, raw_attn_weights
+        return attn_output, attn_weights
+
+
+MULTIHEAD_ATTNS = {
+    'MultiheadAttention': nn.MultiheadAttention,
+    'MHAttentionRPE': MHAttentionRPE,
+}
+
+
+class MLP(nn.Module):
+    """ Very simple multi-layer perceptron (also called FFN)"""
+
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers):
+        super().__init__()
+        self.num_layers = num_layers
+        if num_layers > 0:
+            h = [hidden_dim] * (num_layers - 1)
+            self.layers = nn.ModuleList(nn.Linear(n, k) for n, k in zip([input_dim] + h, h + [output_dim]))
+        else:
+            self.layers = []
+
+    def forward(self, x):
+        for i, layer in enumerate(self.layers):
+            x = F.relu(layer(x)) if i < self.num_layers - 1 else layer(x)
+        return x
+
+
+
+def position_embedding_sine(num_pos_feats=64, temperature=10000, normalize=False, scale=None,
+             x_range=[-20, 20], y_range=[-20, 20], device=None):
+    if scale is not None and normalize is False:
+        raise ValueError("normalize should be True if scale is passed")
+    if scale is None:
+        scale = 2 * math.pi
+
+    x_embed = torch.arange(x_range[0], x_range[1] + 1, device=device) #
+    y_embed = torch.arange(y_range[0], y_range[1] + 1, device=device)
+    if normalize:
+        eps = 1e-6
+        y_embed = y_embed / (y_embed[-1] + eps) * scale
+        x_embed = x_embed / (x_embed[-1] + eps) * scale
+
+    dim_t = torch.arange(num_pos_feats, dtype=torch.float32, device=device)
+    dim_t = temperature ** (2 * (dim_t // 2) / num_pos_feats)
+
+    pos_x = x_embed[:, None] / dim_t
+    pos_y = y_embed[:, None] / dim_t
+    pos_x = torch.stack((pos_x[:, 0::2].sin(), pos_x[:, 1::2].cos()), dim=-1).flatten(1)
+    pos_y = torch.stack((pos_y[:, 0::2].sin(), pos_y[:, 1::2].cos()), dim=-1).flatten(1)
+    return pos_x, pos_y

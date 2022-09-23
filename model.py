@@ -12,7 +12,7 @@ from transformers import BertConfig, BertForPreTraining, AutoTokenizer, AutoMode
     ViTConfig, ViTModel, ViTFeatureExtractor
 import math
 import matplotlib.pyplot as plt
-from pre_model import RobertaEncoder, BertCrossEncoder, BertPooler
+from pre_model import BertCrossEncoder
 import copy
 #os.environ['TORCH_HOME'] = '../../pretrained_model/input/' #setting the environment variable
 
@@ -221,7 +221,7 @@ class FuseModel(nn.Module):
         # self.image_encoder = RobertaEncoder(self.image_config)
 
         self.text_image_encoder = BertCrossEncoder(opt.tran_dim, 5)
-        self.image_encoder = BertCrossEncoder(opt.tran_dim, 1)
+        self.image_encoder = BertCrossEncoder(opt.tran_dim, 3)
 
         self.text_change = nn.Sequential(
             nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
