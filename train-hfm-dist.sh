@@ -20,7 +20,7 @@ fixed_image_model=0
 no_extra_img_trans=0
 gcn=0
 
-text_model=bert-base
+text_model=roberta_base 
 image_model=resnet-50
 #bert-base
 #roberta_base 
