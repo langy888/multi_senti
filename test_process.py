@@ -30,7 +30,7 @@ def test_process(opt, critertion, cl_model, test_loader, last_F1=None, log_summa
         step_num = 0
         for index, data in enumerate(test_loader_tqdm):
             texts_origin, bert_attention_mask, image_origin, text_image_mask, labels, \
-            texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _, emoji_ids, hashtag_ids  = data
+            texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _, emoji_ids, hashtag_ids, img_ids  = data
             # continue
 
             if opt.cuda is True:

@@ -16,6 +16,7 @@ import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 # import tensorflow as tf
 import torch.distributed as dist
+import os
 
 def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1=None, last_Accuracy=None, train_log=None, log_summary_writer:SummaryWriter=None):
 
@@ -33,7 +34,7 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
         step_num = 0
         for index, data in enumerate(dev_loader_tqdm):
             texts_origin, bert_attention_mask, image_origin, text_image_mask, labels, \
-            texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _, emoji_ids, hashtag_ids = data
+            texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _, emoji_ids, hashtag_ids, img_ids = data
             # continue
 
             if opt.cuda is True:
@@ -59,6 +60,13 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
             if log_summary_writer:
                 log_summary_writer.add_scalar('dev_info/loss', loss.item(), global_step=step_num + epoch_step_num)
             step_num += 1
+
+        all_pred = []
+        bad_case = []
+        for gt, pred, ori_index in zip(y_true, y_pre, img_ids):
+            all_pred.append(f"{ori_index},{gt},{pred}")
+            if gt != pred:
+                bad_case.append(f"{ori_index},{gt},{pred}")
 
         dev_loss /= total_labels
         y_true = np.array(y_true)
@@ -103,6 +111,9 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
 
             last_Accuracy, is_save_model, model_name = compare_to_save(last_Accuracy, dev_accuracy, opt, cl_model, train_log, dev_log, 'Acc', opt.save_acc, add_enter=False)
             if is_save_model is True:
+                with open(os.path.join(opt.save_model_path,'dev_bad_case.txt'),'w') as f:
+                    for l in bad_case:
+                        f.write(l+'\n')
                 test_process.test_process(opt, critertion, cl_model, test_loader, last_F1, log_summary_writer, train_log['epoch'])
                 if opt.data_type == 'HFM':
                     last_F1, is_save_model, model_name = compare_to_save(last_F1, dev_F1, opt, cl_model, train_log, dev_log, 'F1-marco', opt.save_F1, 'F1-marco', model_name)

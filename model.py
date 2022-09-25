@@ -202,7 +202,7 @@ class FuseModel(nn.Module):
         self.image_model = ImageModel(opt)
 
         self.text_image_encoder = BertCrossEncoder(opt.tran_dim, 5)
-        self.image_encoder = BertCrossEncoder(opt.tran_dim, 3)
+        self.image_encoder = BertCrossEncoder(opt.tran_dim, 1)
 
         self.text_change = nn.Sequential(
             nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),

@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: fuyubo-hmf-bertcross-sfatt-text-cross-cl-att-concat-3tran
+  name: fuyubo-hmf-bertcross-sfatt-text-cross-cl-att-concat-rerun1
 spec:
   restartPolicy: Never
   hostIPC: false

@@ -99,7 +99,7 @@ class SentenceDataset(Dataset):
             image_augment = copy.deepcopy(image_read)
             image_augment = self.image_transforms(image_augment)
         return self.text_to_id[index], image_origin, self.label_list[index], self.aug_text_ids[self.data_id_list[index]], image_augment,\
-            self.emoji_to_id[index], self.hashtag_to_id[index]
+            self.emoji_to_id[index], self.hashtag_to_id[index], self.data_id_list[index]
 
 
 class Collate():
@@ -129,6 +129,7 @@ class Collate():
         image_augment = torch.FloatTensor([np.array(b[4]) for b in batch_data])
         emoji_ids = [torch.LongTensor(b[5]) for b in batch_data]
         hashtag_ids = [torch.LongTensor(b[6]) for b in batch_data]
+        img_ids = [b[7] for b in batch_data]
 
         data_len = [text.size(0) for text in text_to_id]
         aug_data_len = [text.size(0) for text in aug_text_ids]
@@ -194,7 +195,7 @@ class Collate():
 
         return text_to_id, torch.LongTensor(bert_attention_mask), image_origin, torch.LongTensor(text_image_mask), label, \
                aug_text_ids, torch.LongTensor(tran_bert_attention_mask), image_augment, torch.LongTensor(tran_text_image_mask), target_labels, \
-                emoji_ids, hashtag_ids
+                emoji_ids, hashtag_ids, img_ids
 
 
 def get_resize(image_size):

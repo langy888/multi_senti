@@ -88,7 +88,7 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
         for index, data in enumerate(train_loader_tqdm):
             texts_origin, bert_attention_mask, image_origin, text_image_mask, labels,\
                 texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, target_labels, \
-                    emoji_ids, hashtag_ids = data
+                    emoji_ids, hashtag_ids, img_ids = data
 
             if opt.cuda is True:
                 texts_origin = texts_origin.cuda()
