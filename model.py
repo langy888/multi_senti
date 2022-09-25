@@ -12,7 +12,7 @@ from transformers import BertConfig, BertForPreTraining, AutoTokenizer, AutoMode
     ViTConfig, ViTModel, ViTFeatureExtractor
 import math
 import matplotlib.pyplot as plt
-from pre_model import BertCrossEncoder
+from pre_model import *
 import copy
 #os.environ['TORCH_HOME'] = '../../pretrained_model/input/' #setting the environment variable
 
@@ -111,7 +111,6 @@ class TextModel(nn.Module):
             self.model = BertForPreTraining.from_pretrained(abl_path + 'bert-base-uncased/', config=self.config)
             self.model = self.model.bert
         else:
-            #print("=================")
             #print(os.path.join(abl_path, 'pretrained_model', opt.text_model))
             self.config = BertConfig.from_pretrained(os.path.join('pretrained_model', opt.text_model))
             self.model = AutoModel.from_pretrained(os.path.join('pretrained_model',  opt.text_model))
@@ -149,10 +148,6 @@ class ImageModel(nn.Module):
                 self.resnet = cv_models.resnet101(pretrained=True)
             elif opt.image_model == 'resnet-50':
                 self.resnet = cv_models.resnet50(pretrained=True)
-            elif opt.image_model == 'resnet-34':
-                self.resnet = cv_models.resnet34(pretrained=True)
-            elif opt.image_model == 'resnet-18':
-                self.resnet = cv_models.resnet18(pretrained=True)
             self.resnet_encoder = nn.Sequential(*(list(self.resnet.children())[:-2]))
             self.resnet_avgpool = nn.Sequential(list(self.resnet.children())[-2])
             self.output_dim = self.resnet_encoder[7][2].conv3.out_channels
@@ -171,6 +166,7 @@ class ImageModel(nn.Module):
                     param.requires_grad = False
                 else:
                     param.requires_grad = True
+
 
     def get_output_dim(self):
         return self.output_dim
@@ -195,33 +191,30 @@ class FuseModel(nn.Module):
         super(FuseModel, self).__init__()
         self.fuse_type = opt.fuse_type
         self.image_output_type = opt.image_output_type
-        self.zoom_value = math.sqrt(opt.tran_dim)
         self.save_image_index = 0
 
         self.text_model = TextModel(opt)
         self.image_model = ImageModel(opt)
 
-        # self.text_config = copy.deepcopy(self.text_model.get_config())
-        # self.image_config = copy.deepcopy(self.text_model.get_config())
-
-        # self.text_config.num_attention_heads = opt.tran_dim // 64
-        # self.text_config.hidden_size = opt.tran_dim
-        # self.text_config.num_hidden_layers = opt.tran_num_layers
-
-        # self.image_config.num_attention_heads = opt.tran_dim // 64
-        # self.image_config.hidden_size = opt.tran_dim
-        # self.image_config.num_hidden_layers = opt.image_num_layers
-
-        # if self.text_config.is_decoder:
-        #     self.use_cache = self.text_config.use_cache
-        # else:
-        #     self.use_cache = False
-
-        # self.text_image_encoder = RobertaEncoder(self.text_config)
-        # self.image_encoder = RobertaEncoder(self.image_config)
+        self.img2text_attn = torch.nn.MultiheadAttention(embed_dim=opt.hidden_dim, num_heads=8, dropout=0.1, batch_first=True)
+        self.img2textcond_attn = torch.nn.MultiheadAttention(embed_dim=opt.hidden_dim, num_heads=8, dropout=0.1, batch_first=True)
+        #self.img2img_attn = MHAttentionRPE(d_model=opt.hidden_dim, h=8, dropout=0.1)
+        self.img2img_attn = torch.nn.MultiheadAttention(embed_dim=opt.hidden_dim, num_heads=8, dropout=0.1, batch_first=True)
 
         self.text_image_encoder = BertCrossEncoder(opt.tran_dim, 5)
-        self.image_encoder = BertCrossEncoder(opt.tran_dim, 3)
+        self.image_encoder = BertCrossEncoder(opt.tran_dim, 1)
+        self.position_embedding = PositionEmbeddingSine(128, normalize=True)
+
+        self.image_proj  = nn.Sequential(
+            nn.Linear(opt.tran_dim, opt.hidden_dim),
+            ActivateFun(opt)
+        )
+        self.text_proj = nn.Sequential(
+            nn.Linear(opt.tran_dim, opt.hidden_dim),
+            ActivateFun(opt)
+        )
+        self.norm_text_cond_img = nn.LayerNorm(opt.tran_dim)
+        self.norm_img = nn.LayerNorm(opt.tran_dim)
 
         self.text_change = nn.Sequential(
             nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
@@ -237,27 +230,20 @@ class FuseModel(nn.Module):
             nn.Linear(self.image_model.get_output_dim(), opt.tran_dim),
             ActivateFun(opt)
         )
+
         self.image_cls_change = nn.Sequential(
             nn.Linear(self.image_model.get_output_dim(), opt.tran_dim),
             ActivateFun(opt)
         )
 
-        self.ftext_cls_change = nn.Sequential(
-            nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
-            ActivateFun(opt)
-        )
-        self.fimage_cls_change = nn.Sequential(
-            nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
-            ActivateFun(opt)
-        )
-
-        self.transformer_embedding_layernorm = nn.Sequential(
-            nn.LayerNorm(opt.tran_dim),
-            nn.Dropout(opt.l_dropout)
-        )
-
-        transformer_encoder_layer = nn.TransformerEncoderLayer(d_model=opt.tran_dim, nhead=opt.tran_dim//64, dim_feedforward=opt.tran_dim * 4)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer=transformer_encoder_layer, num_layers=opt.tran_num_layers)
+        # self.ftext_cls_change = nn.Sequential(
+        #     nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
+        #     ActivateFun(opt)
+        # )
+        # self.fimage_cls_change = nn.Sequential(
+        #     nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
+        #     ActivateFun(opt)
+        # )
 
         if self.fuse_type == 'att':
             self.output_attention = nn.Sequential(
@@ -278,10 +264,8 @@ class FuseModel(nn.Module):
         #text_inputs = torch.cat((text_inputs, emoji), dim=1)
         assert text_inputs.size(0) == bert_attention_mask.size(0)
         text_encoder = self.text_model(text_inputs, attention_mask=bert_attention_mask)
-        text_cls = text_encoder.pooler_output # N * H
-        text_cls_init = self.text_cls_change(text_cls)
-        text_encoder = text_encoder.last_hidden_state # N * L * H
-        text_init = self.text_change(text_encoder) # N * L * H
+        text_cls_init = self.text_cls_change(text_encoder.pooler_output) # N * H
+        text_init = self.text_change(text_encoder.last_hidden_state) # N * L * H
         image_encoder, image_cls = self.image_model(image_inputs) # N * X * Hi  N * Hi 
 
         if self.image_output_type == 'all':
@@ -289,23 +273,44 @@ class FuseModel(nn.Module):
             image_encoder_init = self.image_change(image_encoder)
             image_cls_init = self.image_cls_change(image_cls)
             image_init = torch.cat((image_cls_init.unsqueeze(1), image_encoder_init), dim=1)
-        else:
-            image_cls_init = self.image_cls_change(image_cls)
-            image_init = image_cls_init.unsqueeze(1)
 
         image_mask = text_image_mask[:, -image_init.size(1):]
         extended_attention_mask = get_extended_attention_mask(image_mask, image_init.size())
 
+        text_mask = text_image_mask[:, :-image_init.size(1)]
+        #text_extended_attention_mask = get_extended_attention_mask(text_mask, image_init.size())
+
         image_init = self.image_encoder(image_init, image_init, extended_attention_mask)
 
-        ####非crossatt删掉
-        text_image_mask =  text_image_mask[:, :-image_init.size(1)]
+        # visual-linguistic verification
+        text_info = self.img2text_attn(
+            query=image_init, key=text_init,
+            value=text_init, key_padding_mask=text_mask)[0]
+
+        text_embed = self.text_proj(text_info)
+        img_embed = self.image_proj(image_init)
+        verify_score = (F.normalize(img_embed, p=2, dim=-1) *
+                        F.normalize(text_embed, p=2, dim=-1)).sum(dim=-1, keepdim=True)
+        verify_score = torch.exp( - (1 - verify_score).pow(2)  / (2 * 0.5**2))
+
+        # language-guided context encoder
+        text_cond_info = self.img2textcond_attn(
+            query=image_init, key=text_init,
+            value=text_init, key_padding_mask=text_mask)[0]
+
+        q = k = image_init + text_cond_info
+        text_cond_img_ctx = self.img2img_attn(
+            query=q, key=k, value=image_init, key_padding_mask=image_mask)[0]
+
+        # discriminative feature
+        fuse_img_feat = (self.norm_img(image_init) +
+                         self.norm_text_cond_img(text_cond_img_ctx)) * verify_score
 
         #text_image_cat = torch.cat((text_init, image_init), dim=1)
 
         #extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
         #text_image_output = self.text_image_encoder(text_image_cat, text_image_cat, extended_attention_mask)
-        text_image_output = self.text_image_encoder(text_init, image_init, extended_attention_mask)
+        text_image_output = self.text_image_encoder(text_init, fuse_img_feat, extended_attention_mask, image_init)
 
         # fused_text_cls = text_image_output[:,0,:]
         # fused_img_cls = text_image_output[:,-50,:]
@@ -316,7 +321,7 @@ class FuseModel(nn.Module):
         fused_img_cls = 0
 
         text_image_alpha = self.output_attention(text_image_output)
-        text_image_alpha = text_image_alpha.squeeze(-1).masked_fill(text_image_mask == 0, -1e9)
+        text_image_alpha = text_image_alpha.squeeze(-1).masked_fill(text_mask == 0, -1e9)
         text_image_alpha = torch.softmax(text_image_alpha, dim=-1)
         text_image_output = (text_image_alpha.unsqueeze(-1) * text_image_output).sum(dim=1)
 
@@ -434,22 +439,6 @@ class CLModel(nn.Module):
                     fit_cl_lables = fit_cl_lables.cuda()
                 fit_pos_neg /= self.temperature   
                 ff_loss = self.critertion(fit_pos_neg, fit_cl_lables)
-
-            # if self.fo_cl:
-            #     tt_pos_neg = torch.mm(ftext, orgin_image_cls.T)
-            #     tt_cl_lables = torch.arange(tt_pos_neg.size(0))
-            #     if self.set_cuda:
-            #         tt_cl_lables = tt_cl_lables.cuda()
-            #     tt_pos_neg /= self.temperature 
-            #     tt_loss = self.critertion(tt_pos_neg, tt_cl_lables)          
-
-            #     ii_pos_neg = torch.mm(fimage, orgin_text_cls.T)
-            #     ii_cl_lables = torch.arange(ii_pos_neg.size(0))
-            #     if self.set_cuda:
-            #         ii_cl_lables = ii_cl_lables.cuda()
-            #     ii_pos_neg /= self.temperature   
-            #     ii_loss = self.critertion(ii_pos_neg, ii_cl_lables) 
-
 
             return output, cl_self_loss, cla_loss, (it_loss, tt_loss, ii_loss, ff_loss)
         else:

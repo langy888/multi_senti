@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: fuyubo-hmf-bertcross-crossatt-clatt-6imgtrans
+  name: fuyubo-hmf-bertcross-vg-clatt
 spec:
   restartPolicy: Never
   hostIPC: false

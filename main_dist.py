@@ -26,6 +26,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
+    parse.add_argument('-hidden_dim', default=256, type=int)
     parse.add_argument('-ff', default=0, type=int)
     parse.add_argument('-cll', default=0, type=int)
     parse.add_argument('-cla', default=0, type=int)
@@ -167,7 +168,10 @@ if __name__ == '__main__':
 
     if opt.data_type == 'HFM':
         data_path_root = abl_path + 'dataset/data/HFM/'
-        train_data_path = data_path_root + 'train_e3.json'
+        if opt.debug:
+            train_data_path = data_path_root + 'valid_e3.json'
+        else:
+            train_data_path = data_path_root + 'train_e3.json'
         dev_data_path = data_path_root + 'valid_e3.json'
         test_data_path = data_path_root + 'test_e3.json'
         photo_path = data_path_root + '/dataset_image'

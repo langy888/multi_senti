@@ -92,11 +92,14 @@ class BertCoAttention(nn.Module):
         x = x.view(*new_x_shape)
         return x.permute(0, 2, 1, 3)
 
-    def forward(self, s1_hidden_states, s2_hidden_states, s2_attention_mask):
+    def forward(self, s1_hidden_states, s2_hidden_states, s2_attention_mask, v):
         # s2_attention_mask  b*1*1*49
         mixed_query_layer = self.query(s1_hidden_states)  # b*75*768
         mixed_key_layer = self.key(s2_hidden_states)  # b*49*768
-        mixed_value_layer = self.value(s2_hidden_states)
+        if v is not None:
+            mixed_value_layer = self.value(v)
+        else:
+            mixed_value_layer = self.value(s2_hidden_states)
 
         query_layer = self.transpose_for_scores(mixed_query_layer)  # b*12*75*64
         key_layer = self.transpose_for_scores(mixed_key_layer)  # b*12*49*64
@@ -164,8 +167,8 @@ class BertCrossAttention(nn.Module):
         self.bertCoAttn = BertCoAttention(bert_dim)
         self.output = BertSelfOutput(bert_dim)
 
-    def forward(self, s1_input_tensor, s2_input_tensor, s2_attention_mask):
-        s1_cross_output = self.bertCoAttn(s1_input_tensor, s2_input_tensor, s2_attention_mask)
+    def forward(self, s1_input_tensor, s2_input_tensor, s2_attention_mask, v):
+        s1_cross_output = self.bertCoAttn(s1_input_tensor, s2_input_tensor, s2_attention_mask, v)
         attention_output = self.output(s1_cross_output, s1_input_tensor)
         return attention_output
 
@@ -177,8 +180,8 @@ class BertCrossAttentionLayer(nn.Module):
         self.intermediate = BertIntermediate(bert_dim)
         self.output = BertOutput(bert_dim)
 
-    def forward(self, s1_hidden_states, s2_hidden_states, s2_attention_mask):
-        attention_output = self.bertCorssAttn(s1_hidden_states, s2_hidden_states, s2_attention_mask)
+    def forward(self, s1_hidden_states, s2_hidden_states, s2_attention_mask, v):
+        attention_output = self.bertCorssAttn(s1_hidden_states, s2_hidden_states, s2_attention_mask, v)
         # b*75*768
         intermediate_output = self.intermediate(attention_output)
         # b*75*3072
@@ -193,9 +196,9 @@ class BertCrossEncoder(nn.Module):
         layer = BertCrossAttentionLayer(bert_dim)
         self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(layer_num)])
 
-    def forward(self, s1_hidden_states, s2_hidden_states, s2_attention_mask):
+    def forward(self, s1_hidden_states, s2_hidden_states, s2_attention_mask, v=None):
         for layer_module in self.layer:
-            s1_hidden_states = layer_module(s1_hidden_states, s2_hidden_states, s2_attention_mask)
+            s1_hidden_states = layer_module(s1_hidden_states, s2_hidden_states, s2_attention_mask, v)
         return s1_hidden_states
 
 
@@ -393,9 +396,6 @@ class DiscriminativeFeatEncLayer(nn.Module):
 
         return torch.cat([orig_img_feat, fuse_img_feat], dim=-1)
 
-
-
-
 _MODULES = {
     'DecoderWithExtraEncoder': DecoderWithExtraEncoder,
     'MultiStageDecoderLayer': MultiStageDecoderLayer,
@@ -404,9 +404,6 @@ _MODULES = {
 
 def build_vg_decoder(args):
     return vg_decoder_wrapper(args.model_config['decoder'])
-
-
-
 
 def _get_clones(module, N):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
@@ -460,7 +457,6 @@ class MHAttentionRPE(nn.Module):
         nn.init.xavier_uniform_(self.in_proj_weight)
         nn.init.constant_(self.in_proj_bias, 0.)
         nn.init.constant_(self.out_proj.bias, 0.)
-
 
     def forward(self, query, key, value, key_padding_mask=None):
         tgt_len, bs, dim = query.size()
@@ -562,7 +558,7 @@ def position_embedding_sine(num_pos_feats=64, temperature=10000, normalize=False
     if scale is None:
         scale = 2 * math.pi
 
-    x_embed = torch.arange(x_range[0], x_range[1] + 1, device=device) #
+    x_embed = torch.arange(x_range[0], x_range[1] + 1, device=device) 
     y_embed = torch.arange(y_range[0], y_range[1] + 1, device=device)
     if normalize:
         eps = 1e-6
@@ -577,3 +573,111 @@ def position_embedding_sine(num_pos_feats=64, temperature=10000, normalize=False
     pos_x = torch.stack((pos_x[:, 0::2].sin(), pos_x[:, 1::2].cos()), dim=-1).flatten(1)
     pos_y = torch.stack((pos_y[:, 0::2].sin(), pos_y[:, 1::2].cos()), dim=-1).flatten(1)
     return pos_x, pos_y
+
+
+class NestedTensor(object):
+    def __init__(self, tensors, mask):
+        self.tensors = tensors
+        self.mask = mask
+
+    def to(self, device):
+        cast_tensor = self.tensors.to(device)
+        mask = self.mask
+        if mask is not None:
+            assert mask is not None
+            cast_mask = mask.to(device)
+        else:
+            cast_mask = None
+        return NestedTensor(cast_tensor, cast_mask)
+
+    def decompose(self):
+        return self.tensors, self.mask
+
+    def pin_memory(self):
+        self.tensors = self.tensors.pin_memory()
+        self.mask = self.mask.pin_memory()
+        return self
+
+    def __repr__(self):
+        return str(self.tensors)
+
+
+
+class PositionEmbeddingSine(nn.Module):
+    """
+    This is a more standard version of the position embedding, very similar to the one
+    used by the Attention is all you need paper, generalized to work on images.
+    """
+    def __init__(self, num_pos_feats=64, temperature=10000, normalize=False, scale=None):
+        super().__init__()
+        self.num_pos_feats = num_pos_feats
+        self.temperature = temperature
+        self.normalize = normalize
+        if scale is not None and normalize is False:
+            raise ValueError("normalize should be True if scale is passed")
+        if scale is None:
+            scale = 2 * math.pi
+        self.scale = scale
+
+    def forward(self, tensor_list: NestedTensor):
+        x = tensor_list.tensors
+        mask = tensor_list.mask
+        assert mask is not None
+        not_mask = ~mask
+        y_embed = not_mask.cumsum(1, dtype=torch.float32)
+        x_embed = not_mask.cumsum(2, dtype=torch.float32)
+        if self.normalize:
+            eps = 1e-6
+            y_embed = y_embed / (y_embed[:, -1:, :] + eps) * self.scale
+            x_embed = x_embed / (x_embed[:, :, -1:] + eps) * self.scale
+
+        dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=x.device)
+        dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
+
+        pos_x = x_embed[:, :, :, None] / dim_t
+        pos_y = y_embed[:, :, :, None] / dim_t
+        pos_x = torch.stack((pos_x[:, :, :, 0::2].sin(), pos_x[:, :, :, 1::2].cos()), dim=4).flatten(3)
+        pos_y = torch.stack((pos_y[:, :, :, 0::2].sin(), pos_y[:, :, :, 1::2].cos()), dim=4).flatten(3)
+        pos = torch.cat((pos_y, pos_x), dim=3).permute(0, 3, 1, 2)
+        return pos
+
+
+class BackboneBase(nn.Module):
+
+    def __init__(self, backbone: nn.Module, train_backbone: bool, num_channels: int, return_interm_layers: bool):
+        super().__init__()
+        for name, parameter in backbone.named_parameters():
+            if not train_backbone or 'layer2' not in name and 'layer3' not in name and 'layer4' not in name:
+                parameter.requires_grad_(False)
+        if return_interm_layers:
+            return_layers = {"layer1": "0", "layer2": "1", "layer3": "2", "layer4": "3"}
+        else:
+            return_layers = {'layer4': "0"}
+        self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
+        self.num_channels = num_channels
+
+    def forward(self, tensor_list: NestedTensor):
+        xs = self.body(tensor_list.tensors)
+        out = {}
+        for name, x in xs.items():
+            m = tensor_list.mask
+            assert m is not None
+            mask = F.interpolate(m[None].float(), size=x.shape[-2:]).to(torch.bool)[0]
+            out[name] = NestedTensor(x, mask)
+        return out
+
+
+class Joiner(nn.Sequential):
+    def __init__(self, backbone, position_embedding):
+        super().__init__(backbone, position_embedding)
+
+    def forward(self, tensor_list: NestedTensor):
+        xs = self[0](tensor_list)
+        out: List[NestedTensor] = []
+        pos = []
+        for name, x in xs.items():
+            out.append(x)
+            # position encoding
+            pos.append(self[1](x).to(x.tensors.dtype))
+
+        return out, pos
