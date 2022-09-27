@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fuyubo-hfm-test
+  #fuyubo-mvsa-sig-bert-r50-nofix-imgenc
+spec:
+  restartPolicy: Never
+  hostIPC: false
+  schedulerName: sense-rubber
+  imagePullSecrets:
+    - name: sensebee-wb
+  containers:
+    - name: fuyubo-multi-sent
+      image: registry.sensetime.com/fdc/sensebee-mmdetection:dinghaojie-master-patch-36032-0a1c9772
+        #registry.sensetime.com/fdc/sensebee-mmdetection:dev_fuyubo-e29c027d
+      env:
+          - name: USER
+            value: "900025459"        
+      securityContext:
+        runAsUser: 900025459
+        runAsGroup: 900025459
+        capabilities:
+          drop:
+          - CHOWN
+      resources:
+        limits:
+          nvidia.com/gpu-v100: "1"
+        requests:
+          nvidia.com/gpu-v100: "1"
+      volumeMounts:
+        - name: data-storage
+          mountPath: /datasets
+        - name: output-storage
+          mountPath: /output
+      command: ["/bin/bash", "-c", "cd /output && sh test-hfm-dist.sh 1"]
+      args: []
+  volumes:
+    #&& [ -d data ] || ln -s /data data
+    # SH-132/162: /data/nfs
+    # BJ-101/103: /home/data/nfs
+    # SH-08: /mnt/lustre/sensebee
+    - name: data-storage
+      hostPath:
+        path: /mnt/lustre/sensebee/backup/fuyubo1/
+        #path: /mnt/10-5-109-198/sensebee/data/cityBigModel
+        #path: /mnt/10-5-109-212/sensebee/data/detection      #/mnt/10-5-109-198/sensebee/data 
+    - name: output-storage
+      hostPath:
+        path: /mnt/lustre/sensebee/backup/fuyubo1/multi_senti/CLMLF
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname
+            operator: NotIn
+            values: [sh-idc1-10-5-8-49, sh-idc1-10-5-8-155 , sh-idc1-10-5-8-151, sh-idc1-10-5-8-157, sh-idc1-10-5-8-68, sh-idc1-10-5-8-44, sh-idc1-10-5-8-71, sh-idc1-10-5-8-152 ]

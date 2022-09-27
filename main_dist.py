@@ -203,7 +203,7 @@ if __name__ == '__main__':
         opt.scheduler_num_lr = opt.lr / opt.scheduler_step
 
     print(opt)
-    if not opt.cuda or dist.get_rank() == 0:
+    if opt.cuda and opt.gpu_num > 1 and dist.get_rank() == 0:
         opt.save_model_path = WriteFile(opt.save_model_path, 'train_correct_log.txt', str(opt) + '\n\n', 'a+', change_file_name=True)
     log_summary_writer = None
     log_summary_writer = SummaryWriter(log_dir=opt.save_model_path)
@@ -215,8 +215,9 @@ if __name__ == '__main__':
         train_process.train_process(opt, train_loader, dev_loader, test_loader, cl_fuse_model, critertion, log_summary_writer)
     elif opt.run_type == 2:
         print('\nTest Begin')
-        model_path = "checkpoint/best_model/best-model.pth"
+        model_path = opt.test_model_path
         cl_fuse_model.load_state_dict(torch.load(model_path, map_location='cpu'), strict=True)
-        test_process.test_process(opt, critertion, cl_fuse_model, test_loader, epoch=1)
+        test_process.test_process(opt, critertion, cl_fuse_model, dev_loader, epoch=1)
+        #_ , _ = dev_process.dev_process(opt, critertion, cl_fuse_model, dev_loader)
 
     log_summary_writer.close()

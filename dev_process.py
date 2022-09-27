@@ -22,6 +22,7 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
 
     y_true = []
     y_pre = []
+    orig_id = []
     total_labels = 0
     dev_loss = 0
 
@@ -55,6 +56,7 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
             total_labels += labels.size(0)
             y_true.extend(labels.cpu())
             y_pre.extend(predicted.cpu())
+            orig_id.extend(img_ids)
 
             dev_loader_tqdm.set_description("Dev Iteration, loss: %.6f" % loss)
             if log_summary_writer:
@@ -63,7 +65,7 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
 
         all_pred = []
         bad_case = []
-        for gt, pred, ori_index in zip(y_true, y_pre, img_ids):
+        for gt, pred, ori_index in zip(y_true, y_pre, orig_id):
             all_pred.append(f"{ori_index},{gt},{pred}")
             if gt != pred:
                 bad_case.append(f"{ori_index},{gt},{pred}")
@@ -83,6 +85,13 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
                        (dev_accuracy, dev_F1_weighted, dev_precision_weighted, dev_R_weighted, dev_F1, dev_precision, dev_R, dev_loss)
 
         print(save_content)
+
+        if opt.run_type == 2:
+            with open(os.path.join(opt.save_model_path,'dev_bad_case.txt'),'w') as f:
+                for l in bad_case:
+                    f.write(l+'\n')
+            exit()
+
 
         if log_summary_writer:
             log_summary_writer.add_scalar('dev_info/loss_epoch', dev_loss, global_step=train_log['epoch'])

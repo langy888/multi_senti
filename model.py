@@ -288,20 +288,20 @@ class FuseModel(nn.Module):
         text_mask =  text_image_mask[:, :-image_init.size(1)]
         text_extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_mask, text_inputs.size())
 
-        text_image_cat = torch.cat((text_init, image_init), dim=1)
+        #text_image_cat = torch.cat((text_init, image_init), dim=1)
 
-        extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
-        text_image_output = self.text_image_encoder(text_image_cat, text_image_cat, extended_attention_mask)
+        #extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
+        text_image_output = self.text_image_encoder(text_init, image_init, extended_attention_mask, cl_att=1)
 
         text_image_clatt = self.text_image_encoder(image_init, text_init, text_extended_attention_mask, cl_att=1) # N, 50, 768
 
         fused_text_cls = text_image_output[:,0,:]
-        fused_img_cls = text_image_output[:,-50,:]
+        fused_img_cls = text_image_clatt[:,0,:]
 
         fused_text_cls = self.ftext_cls_change(fused_text_cls)
         fused_img_cls = self.fimage_cls_change(fused_img_cls)
 
-        text_image_output = text_image_output[:, :-image_init.size(1)]
+        #text_image_output = text_image_output[:, :-image_init.size(1)]
 
         #text_image_mask = torch.cat((text_image_mask,image_mask), dim=1)
         text_image_output = torch.cat((text_image_output,text_image_clatt), dim=1)

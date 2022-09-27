@@ -13,11 +13,12 @@ import numpy as np
 from  torch.utils.tensorboard import SummaryWriter
 # import tensorflow as tf
 import math
-
+import os 
 
 def test_process(opt, critertion, cl_model, test_loader, last_F1=None, log_summary_writer: SummaryWriter=None, epoch=None):
     y_true = []
     y_pre = []
+    orig_id = []
     total_labels = 0
     test_loss = 0
 
@@ -51,6 +52,7 @@ def test_process(opt, critertion, cl_model, test_loader, last_F1=None, log_summa
             total_labels += labels.size(0)
             y_true.extend(labels.cpu())
             y_pre.extend(predicted.cpu())
+            orig_id.extend(img_ids)
 
             test_loader_tqdm.set_description("Test Iteration, loss: %.6f" % loss)
             if log_summary_writer:
@@ -72,6 +74,22 @@ def test_process(opt, critertion, cl_model, test_loader, last_F1=None, log_summa
             (test_accuracy, test_F1_weighted, test_precision_weighted, test_R_weighted, test_F1, test_precision, test_R, test_loss)
 
         print(save_content)
+
+        all_pred = []
+        bad_case = []
+        for gt, pred, ori_index in zip(y_true, y_pre, orig_id):
+            all_pred.append(f"{ori_index},{gt},{pred}")
+            if gt != pred:
+                bad_case.append(f"{ori_index},{gt},{pred}")
+
+        if opt.run_type == 2:
+            with open(os.path.join(opt.save_model_path,'test_all_pred.txt'),'w') as f:
+                for l in all_pred:
+                    f.write(l+'\n')
+            with open(os.path.join(opt.save_model_path,'test_bad_case.txt'),'w') as f:
+                for l in bad_case:
+                    f.write(l+'\n')
+
 
         if log_summary_writer:
             log_summary_writer.add_scalar('test_info/loss_epoch', test_loss, global_step=epoch)

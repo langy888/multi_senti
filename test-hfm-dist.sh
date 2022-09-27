@@ -33,11 +33,11 @@ cla=0
 it=1
 tt=0
 ii=0
-ff=1
+ff=0
 
-run_type=1
-test_model_path=/output/checkpoint/
-
+run_type=2
+test_model_path=/output/checkpoint/2022-09-22-10-14-20-HFM-5-att-128-1-bert-base-resnet-50-/09-22-20-31-12-Acc-0.87635.pth
+#/mnt/lustre/sensebee/backup/fuyubo1/multi_senti/CLMLF/checkpoint/2022-09-22-10-14-20-HFM-5-att-128-1-bert-base-resnet-50-/09-22-20-31-12-Acc-0.87635.pth
 python -m torch.distributed.launch --nproc_per_node=$1 --nnodes=1 main_dist.py -cuda -gpu_num $1 -epoch ${epoch} -num_workers 0  \
         -add_note ${data_type}-${tran_num_layers}-${fuse_type}-${batch}-${image_num_layers}-${text_model}-${image_model} \
         -data_type ${data_type} -text_model ${text_model} -image_model ${image_model} -run_type ${run_type}  -test_model_path ${test_model_path}\
