@@ -14,7 +14,7 @@ batch=128
 acc_grad=8
 tran_num_layers=5
 image_num_layers=6
-tran_dim=256
+tran_dim=768
 
 fixed_image_model=0
 no_extra_img_trans=0
