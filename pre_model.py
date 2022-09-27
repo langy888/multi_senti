@@ -200,5 +200,31 @@ class BertCrossEncoder(nn.Module):
 
     def forward(self, s1_hidden_states, s2_hidden_states, s2_attention_mask, cl_att=0):
         for layer_module in self.layer:
+            s1_hidden_states = layer_module(s1_hidden_states, s2_hidden_states, s2_attention_mask)
+        return s1_hidden_states
+
+
+class BertCSBlock(nn.Module):
+    def __init__(self, bert_dim):
+        super(BertCSEncoder, self).__init__()
+        layer1 = BertCrossAttentionLayer(bert_dim)
+        layer2 = BertCrossAttentionLayer(bert_dim)        
+        
+    def forward(self, s1_hidden_states, s2_hidden_states, s2_attention_mask, cl_att=0):
+        for layer_module in self.layer:
+            s1_hidden_states = layer_module(s1_hidden_states, s2_hidden_states, s2_attention_mask, cl_att)
+        return s1_hidden_states
+
+
+
+class BertCSEncoder(nn.Module):
+    def __init__(self, bert_dim, layer_num=3):
+        super(BertCSEncoder, self).__init__()
+        layer1 = BertCrossAttentionLayer(bert_dim)
+        layer2 = BertCrossAttentionLayer(bert_dim)        
+        self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(layer_num)])
+
+    def forward(self, s1_hidden_states, s2_hidden_states, s2_attention_mask, cl_att=0):
+        for layer_module in self.layer:
             s1_hidden_states = layer_module(s1_hidden_states, s2_hidden_states, s2_attention_mask, cl_att)
         return s1_hidden_states
