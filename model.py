@@ -12,7 +12,7 @@ from transformers import BertConfig, BertForPreTraining, AutoTokenizer, AutoMode
     ViTConfig, ViTModel, ViTFeatureExtractor
 import math
 import matplotlib.pyplot as plt
-from pre_model import BertCrossEncoder
+from pre_model import *
 import copy
 #os.environ['TORCH_HOME'] = '../../pretrained_model/input/' #setting the environment variable
 
@@ -37,40 +37,6 @@ class ModelParam:
         self.image_coordinate_position_token = image_coordinate_position_token
         self.emoji = emoji
         self.hashtag = hashtag
-
-
-def get_extended_attention_mask(attention_mask, input_shape):
-    """
-    Makes broadcastable attention and causal masks so that future and masked tokens are ignored.
-
-    Arguments:
-        attention_mask (:obj:`torch.Tensor`):
-            Mask with ones indicating tokens to attend to, zeros for tokens to ignore.
-        input_shape (:obj:`Tuple[int]`):
-            The shape of the input to the model.
-
-    Returns:
-        :obj:`torch.Tensor` The extended attention mask, with a the same dtype as :obj:`attention_mask.dtype`.
-    """
-    # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
-    # ourselves in which case we just need to make it broadcastable to all heads.
-    if attention_mask.dim() == 3:
-        extended_attention_mask = attention_mask[:, None, :, :]
-    elif attention_mask.dim() == 2:
-        extended_attention_mask = attention_mask[:, None, None, :]
-    else:
-        raise ValueError(
-            f"Wrong shape for input_ids (shape {input_shape}) or attention_mask (shape {attention_mask.shape})"
-        )
-
-    # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
-    # masked positions, this operation will create a tensor which is 0.0 for
-    # positions we want to attend and -10000.0 for masked positions.
-    # Since we are adding it to the raw scores before the softmax, this is
-    # effectively the same as removing these entirely.
-    extended_attention_mask = extended_attention_mask.to(dtype=torch.float32)  # fp16 compatibility
-    extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-    return extended_attention_mask
 
 
 class ActivateFun(nn.Module):
@@ -201,7 +167,7 @@ class FuseModel(nn.Module):
         self.text_model = TextModel(opt)
         self.image_model = ImageModel(opt)
 
-        self.text_image_encoder = BertCrossEncoder(opt.tran_dim, 5)
+        self.text_image_encoder = BertCSEncoder(opt.tran_dim, opt.concat_att, opt.cross_coatt, opt.self_coatt, 3)
         self.image_encoder = BertCrossEncoder(opt.tran_dim, 1)
 
         self.text_change = nn.Sequential(
@@ -279,10 +245,12 @@ class FuseModel(nn.Module):
             image_cls_init = self.image_cls_change(image_cls)
             image_init = image_cls_init.unsqueeze(1)
 
-        image_mask = text_image_mask[:, -image_init.size(1):]
-        extended_attention_mask = get_extended_attention_mask(image_mask, image_init.size())
+        extended_attention_mask = get_extended_attention_mask(text_image_mask, image_init.size())
 
-        image_init = self.image_encoder(image_init, image_init, extended_attention_mask)
+        image_mask = text_image_mask[:, -image_init.size(1):]
+        image_extended_attention_mask = get_extended_attention_mask(image_mask, image_init.size())
+
+        image_init = self.image_encoder(image_init, image_init, image_extended_attention_mask)
 
         ####非crossatt删掉
         text_mask =  text_image_mask[:, :-image_init.size(1)]
@@ -291,20 +259,16 @@ class FuseModel(nn.Module):
         #text_image_cat = torch.cat((text_init, image_init), dim=1)
 
         #extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
-        text_image_output = self.text_image_encoder(text_init, image_init, extended_attention_mask, cl_att=1)
+        text_f, img_f = self.text_image_encoder(text_init, image_init, text_extended_attention_mask, image_extended_attention_mask,  extended_attention_mask)
 
-        text_image_clatt = self.text_image_encoder(image_init, text_init, text_extended_attention_mask, cl_att=1) # N, 50, 768
-
-        fused_text_cls = text_image_output[:,0,:]
-        fused_img_cls = text_image_clatt[:,0,:]
+    
+        fused_text_cls = text_f[:,0,:]
+        fused_img_cls = img_f[:,0,:]
 
         fused_text_cls = self.ftext_cls_change(fused_text_cls)
         fused_img_cls = self.fimage_cls_change(fused_img_cls)
 
-        #text_image_output = text_image_output[:, :-image_init.size(1)]
-
-        #text_image_mask = torch.cat((text_image_mask,image_mask), dim=1)
-        text_image_output = torch.cat((text_image_output,text_image_clatt), dim=1)
+        text_image_output = torch.cat((text_f, img_f), dim=1)
 
         text_image_alpha = self.output_attention(text_image_output)
         text_image_alpha = text_image_alpha.squeeze(-1).masked_fill(text_image_mask == 0, -1e9)

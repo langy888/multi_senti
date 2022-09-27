@@ -53,6 +53,42 @@ from transformers.models.roberta.configuration_roberta import RobertaConfig
 
 logger = logging.get_logger(__name__)
 
+
+def get_extended_attention_mask(attention_mask, input_shape):
+    """
+    Makes broadcastable attention and causal masks so that future and masked tokens are ignored.
+
+    Arguments:
+        attention_mask (:obj:`torch.Tensor`):
+            Mask with ones indicating tokens to attend to, zeros for tokens to ignore.
+        input_shape (:obj:`Tuple[int]`):
+            The shape of the input to the model.
+
+    Returns:
+        :obj:`torch.Tensor` The extended attention mask, with a the same dtype as :obj:`attention_mask.dtype`.
+    """
+    # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
+    # ourselves in which case we just need to make it broadcastable to all heads.
+    if attention_mask.dim() == 3:
+        extended_attention_mask = attention_mask[:, None, :, :]
+    elif attention_mask.dim() == 2:
+        extended_attention_mask = attention_mask[:, None, None, :]
+    else:
+        raise ValueError(
+            f"Wrong shape for input_ids (shape {input_shape}) or attention_mask (shape {attention_mask.shape})"
+        )
+
+    # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
+    # masked positions, this operation will create a tensor which is 0.0 for
+    # positions we want to attend and -10000.0 for masked positions.
+    # Since we are adding it to the raw scores before the softmax, this is
+    # effectively the same as removing these entirely.
+    extended_attention_mask = extended_attention_mask.to(dtype=torch.float32)  # fp16 compatibility
+    extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
+    return extended_attention_mask
+
+
+
 class BertLayerNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-12):
         """Construct a layernorm module in the TF style (epsilon inside the square root).
@@ -200,31 +236,45 @@ class BertCrossEncoder(nn.Module):
 
     def forward(self, s1_hidden_states, s2_hidden_states, s2_attention_mask, cl_att=0):
         for layer_module in self.layer:
-            s1_hidden_states = layer_module(s1_hidden_states, s2_hidden_states, s2_attention_mask)
+            s1_hidden_states = layer_module(s1_hidden_states, s2_hidden_states, s2_attention_mask, cl_att)
         return s1_hidden_states
 
 
 class BertCSBlock(nn.Module):
-    def __init__(self, bert_dim):
-        super(BertCSEncoder, self).__init__()
-        layer1 = BertCrossAttentionLayer(bert_dim)
-        layer2 = BertCrossAttentionLayer(bert_dim)        
-        
-    def forward(self, s1_hidden_states, s2_hidden_states, s2_attention_mask, cl_att=0):
-        for layer_module in self.layer:
-            s1_hidden_states = layer_module(s1_hidden_states, s2_hidden_states, s2_attention_mask, cl_att)
-        return s1_hidden_states
+    def __init__(self, bert_dim, concat_att=0, cross_coatt=0, self_coatt=0):
+        super(BertCSBlock, self).__init__()
+        self.cross_coatt = cross_coatt
+        self.self_coatt = self_coatt
+        self.concat_att = concat_att
+        self.colayer_it = BertCrossAttentionLayer(bert_dim)
+        self.colayer_ti = BertCrossAttentionLayer(bert_dim)        
+        if concat_att:
+            self.sf_att = BertCrossAttentionLayer(bert_dim)
+        else:
+            self.isf_att = BertCrossAttentionLayer(bert_dim)
+            self.tsf_att = BertCrossAttentionLayer(bert_dim)
 
+    def forward(self, text_f, image_f, text_m, image_m, text_image_m, cl_att=0):
+        it_coatt = self.colayer_it(image_f, text_f, text_m, self.cross_coatt) #N Li H
+        ti_coatt = self.colayer_ti(text_f, image_f, image_m, self.cross_coatt) #N Lt H
+        if self.concat_att:
+            text_image = torch.cat((ti_coatt, it_coatt), dim=1)
+            text_image_output = self.sf_att(text_image, text_image, text_image_m, self.self_coatt)
+            text_att = text_image_output[:, :-image_m.size(-1), :]
+            image_att = text_image_output[:, -image_m.size(-1):, :]
+        else:
+            text_att = self.isf_att(ti_coatt, ti_coatt, text_m, self.self_coatt)
+            image_att = self.tsf_att(it_coatt, it_coatt, image_m, self.self_coatt)
+        return text_att, image_att
 
 
 class BertCSEncoder(nn.Module):
-    def __init__(self, bert_dim, layer_num=3):
+    def __init__(self, bert_dim, concat_att=0, cross_coatt=0, self_coatt=0, layer_num=3):
         super(BertCSEncoder, self).__init__()
-        layer1 = BertCrossAttentionLayer(bert_dim)
-        layer2 = BertCrossAttentionLayer(bert_dim)        
+        layer = BertCSBlock(bert_dim, concat_att, cross_coatt, self_coatt)     
         self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(layer_num)])
 
-    def forward(self, s1_hidden_states, s2_hidden_states, s2_attention_mask, cl_att=0):
+    def forward(self, text_f, image_f, text_m, image_m, text_image_m, cl_att=0):
         for layer_module in self.layer:
-            s1_hidden_states = layer_module(s1_hidden_states, s2_hidden_states, s2_attention_mask, cl_att)
-        return s1_hidden_states
+            text_f, image_f = layer_module(text_f, image_f, text_m, image_m, text_image_m)
+        return text_f, image_f
