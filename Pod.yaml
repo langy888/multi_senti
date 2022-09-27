@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: fuyubo-hmf-csbert-cat-cross0-self0
+  name: fuyubo-hmf-csbert-sep-cross1-self0
 spec:
   restartPolicy: Never
   hostIPC: false
