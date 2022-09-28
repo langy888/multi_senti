@@ -203,7 +203,7 @@ class FuseModel(nn.Module):
 
         self.text_image_encoder = BertCrossEncoder(opt.tran_dim, 5)
         self.image_encoder = BertCrossEncoder(opt.tran_dim, 1)
-        self.position_embedding = PositionEmbeddingSine(128, normalize=True)
+        #self.position_embedding = PositionEmbeddingSine(128, normalize=True)
 
         self.image_proj  = nn.Sequential(
             nn.Linear(opt.tran_dim, opt.hidden_dim),
@@ -310,7 +310,7 @@ class FuseModel(nn.Module):
 
         #extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
         #text_image_output = self.text_image_encoder(text_image_cat, text_image_cat, extended_attention_mask)
-        text_image_output = self.text_image_encoder(text_init, fuse_img_feat, extended_attention_mask, image_init)
+        text_image_output = self.text_image_encoder(text_init, fuse_img_feat, extended_attention_mask)
 
         # fused_text_cls = text_image_output[:,0,:]
         # fused_img_cls = text_image_output[:,-50,:]
