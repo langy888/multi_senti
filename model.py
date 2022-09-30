@@ -168,6 +168,13 @@ class FuseModel(nn.Module):
         self.image_model = ImageModel(opt)
 
         self.text_image_encoder = BertCSEncoder(opt.tran_dim, opt.concat_att, opt.cross_coatt, opt.self_coatt, 3)
+        
+        #self.ti_cross = BertCrossEncoder(opt.tran_dim, 3)
+        #self.it_cross = BertCrossEncoder(opt.tran_dim, 3)
+        #self.text_image_encoder = BertCrossEncoder(opt.tran_dim, 3)
+
+        self.cross_coatt = opt.cross_coatt
+        self.self_coatt = opt.self_coatt
         self.image_encoder = BertCrossEncoder(opt.tran_dim, 1)
 
         self.text_change = nn.Sequential(
@@ -258,17 +265,21 @@ class FuseModel(nn.Module):
 
         #text_image_cat = torch.cat((text_init, image_init), dim=1)
 
-        #extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
         text_f, img_f = self.text_image_encoder(text_init, image_init, text_extended_attention_mask, image_extended_attention_mask,  extended_attention_mask)
+        text_image_output = torch.cat((text_f, img_f), dim=1)
 
+        # text_f = self.ti_cross(text_init, image_init, image_extended_attention_mask, self.cross_coatt)
+        # img_f = self.it_cross(image_init, text_init, text_extended_attention_mask, self.cross_coatt)
+        # text_image_output = torch.cat((text_f, img_f), dim=1)
+        # self.text_image_encoder(text_image_output, text_image_output, extended_attention_mask, self.self_coatt)
     
+
         fused_text_cls = text_f[:,0,:]
         fused_img_cls = img_f[:,0,:]
 
         fused_text_cls = self.ftext_cls_change(fused_text_cls)
         fused_img_cls = self.fimage_cls_change(fused_img_cls)
 
-        text_image_output = torch.cat((text_f, img_f), dim=1)
 
         text_image_alpha = self.output_attention(text_image_output)
         text_image_alpha = text_image_alpha.squeeze(-1).masked_fill(text_image_mask == 0, -1e9)
@@ -284,7 +295,6 @@ class CLModel(nn.Module):
         self.fuse_model = FuseModel(opt)
         self.temperature = opt.temperature
         self.set_cuda = opt.cuda
-        self.clloss = 1
         self.cll = opt.cll
         self.it_cl = opt.it
         self.cla = opt.cla
