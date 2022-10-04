@@ -151,7 +151,6 @@ class Collate():
         emoji_ids = run_utils.pad_sequence(emoji_ids, batch_first=True, padding_value=0)
         hashtag_ids = run_utils.pad_sequence(hashtag_ids, batch_first=True, padding_value=0)
 
-
         text_to_id = run_utils.pad_sequence(text_to_id, batch_first=True, padding_value=0)
         aug_text_ids = run_utils.pad_sequence(aug_text_ids, batch_first=True, padding_value=0)
 
@@ -208,7 +207,7 @@ def data_process(opt, data_path, text_tokenizer, photo_path, data_type, data_tra
 
     transform_base = transforms.Compose(
         [
-            transforms.Resize(get_resize(opt.image_size)),
+            transforms.Resize(800),
             transforms.CenterCrop(opt.image_size),
             transforms.RandomHorizontalFlip(0.5),
             transforms.ToTensor(),
@@ -216,15 +215,13 @@ def data_process(opt, data_path, text_tokenizer, photo_path, data_type, data_tra
         ]
     )
 
-    # transform_train = copy.deepcopy(transform_base)
     transform_augment = copy.deepcopy(transform_base)
     transform_augment.transforms.insert(0, RandAugment(2, 14))
     transform_train = transform_augment
-    # transform_train = [transform_train, transform_augment]
 
     transform_test_dev = transforms.Compose(
         [
-            transforms.Resize(get_resize(opt.image_size)),
+            transforms.Resize(800),
             transforms.CenterCrop(opt.image_size),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])

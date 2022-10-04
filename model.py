@@ -39,40 +39,6 @@ class ModelParam:
         self.hashtag = hashtag
 
 
-def get_extended_attention_mask(attention_mask, input_shape):
-    """
-    Makes broadcastable attention and causal masks so that future and masked tokens are ignored.
-
-    Arguments:
-        attention_mask (:obj:`torch.Tensor`):
-            Mask with ones indicating tokens to attend to, zeros for tokens to ignore.
-        input_shape (:obj:`Tuple[int]`):
-            The shape of the input to the model.
-
-    Returns:
-        :obj:`torch.Tensor` The extended attention mask, with a the same dtype as :obj:`attention_mask.dtype`.
-    """
-    # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
-    # ourselves in which case we just need to make it broadcastable to all heads.
-    if attention_mask.dim() == 3:
-        extended_attention_mask = attention_mask[:, None, :, :]
-    elif attention_mask.dim() == 2:
-        extended_attention_mask = attention_mask[:, None, None, :]
-    else:
-        raise ValueError(
-            f"Wrong shape for input_ids (shape {input_shape}) or attention_mask (shape {attention_mask.shape})"
-        )
-
-    # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
-    # masked positions, this operation will create a tensor which is 0.0 for
-    # positions we want to attend and -10000.0 for masked positions.
-    # Since we are adding it to the raw scores before the softmax, this is
-    # effectively the same as removing these entirely.
-    extended_attention_mask = extended_attention_mask.to(dtype=torch.float32)  # fp16 compatibility
-    extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-    return extended_attention_mask
-
-
 class ActivateFun(nn.Module):
     def __init__(self, opt):
         super(ActivateFun, self).__init__()
@@ -139,51 +105,21 @@ class TextModel(nn.Module):
 class ImageModel(nn.Module):
     def __init__(self, opt):
         super(ImageModel, self).__init__()
-        abl_path = '' if not opt.debug else "/mnt/lustre/sensebee/backup/fuyubo1/multi_senti/CLMLF/"
-        self.image_model = opt.image_model
-        if 'resnet' in opt.image_model:
-            if opt.image_model == 'resnet-152':
-                self.resnet = cv_models.resnet152(pretrained=True)
-            elif opt.image_model == 'resnet-101':
-                self.resnet = cv_models.resnet101(pretrained=True)
-            elif opt.image_model == 'resnet-50':
-                self.resnet = cv_models.resnet50(pretrained=True)
-            self.resnet_encoder = nn.Sequential(*(list(self.resnet.children())[:-2]))
-            self.resnet_avgpool = nn.Sequential(list(self.resnet.children())[-2])
-            self.output_dim = self.resnet_encoder[7][2].conv3.out_channels
-            for param in self.resnet.parameters():
-                if opt.fixed_image_model:
-                    param.requires_grad = False
-                else:
-                    param.requires_grad = True
-
-        elif 'vit' in opt.image_model:
-            self.vit = ViTModel.from_pretrained(os.path.join(abl_path, 'pretrained_model',  opt.image_model)) 
-            self.output_dim = self.vit.config.hidden_size
-
-            for param in self.vit.parameters():
-                if opt.fixed_image_model:
-                    param.requires_grad = False
-                else:
-                    param.requires_grad = True
-
-
+        abl_path = '/output/' if not opt.debug else "/mnt/lustre/sensebee/backup/fuyubo1/multi_senti/CLMLF/"
+        detr_path = abl_path + "pretrained_model/detr-r50-e632da11.pth"
+        self.detr , detr_post = init_detr_args(detr_path)
+        for param in self.detr.parameters():
+            if opt.fixed_image_model:
+                param.requires_grad = False
+            else:
+                param.requires_grad = True
+        
     def get_output_dim(self):
-        return self.output_dim
+        return 256
 
     def forward(self, images):
-        if 'resnet' in self.image_model:
-            image_encoder = self.resnet_encoder(images)
-            # image_encoder = self.conv_output(image_encoder)
-            image_cls = self.resnet_avgpool(image_encoder)
-            image_cls = torch.flatten(image_cls, 1)
-            return image_encoder, image_cls
-        if 'vit' in  self.image_model:
-            #pixel_values = self.feature_extractor(images=images, return_tensors='pt')
-            outputs = self.vit(pixel_values = images)
-            image_encoder = outputs.last_hidden_state
-            image_cls = outputs.pooler_output
-            return image_encoder, image_cls
+        outputs = self.detr(images)
+        return outputs
 
 
 class FuseModel(nn.Module):
@@ -457,3 +393,8 @@ class TensorBoardModel(nn.Module):
         orgin_param.set_data_param(texts=texts, bert_attention_mask=bert_attention_mask, images=images, text_image_mask=text_image_mask)
         augment_param.set_data_param(texts=texts_augment, bert_attention_mask=bert_attention_mask_augment, images=images_augment, text_image_mask=text_image_mask_augment)
         return self.cl_model(orgin_param, augment_param, label, [torch.ones(1, dtype=torch.int64) for _ in range(3)])
+
+if __name__ == "__main__":
+    cp = torch.load("/mnt/lustre/sensebee/backup/fuyubo1/multi_senti/CLMLF/pretrained_model/detr-r50-e632da11.pth", map_location='cpu')
+    for n,p in cp["model"].items():
+        pass
