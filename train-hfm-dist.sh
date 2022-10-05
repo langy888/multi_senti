@@ -20,7 +20,7 @@ no_extra_img_trans=0
 gcn=0
 
 text_model=bert-base 
-image_model=resnet-50
+image_model=vit_b_32
 #bert-base
 #roberta_base 
 #resnet-50
@@ -30,7 +30,7 @@ image_model=resnet-50
 #simces_roberta_unsup
 cll=1
 cla=0
-it=0
+it=1
 tt=0
 ii=0
 ff=1

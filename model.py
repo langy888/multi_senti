@@ -152,8 +152,10 @@ class ImageModel(nn.Module):
             #pixel_values = self.feature_extractor(images=images, return_tensors='pt')
             outputs = self.vit(pixel_values = images)
             image_encoder = outputs.last_hidden_state
+
             image_cls = outputs.pooler_output
             return image_encoder, image_cls
+            #return image_encoder[:,1:,:], image_cls
 
 
 class FuseModel(nn.Module):
@@ -244,7 +246,8 @@ class FuseModel(nn.Module):
         image_encoder, image_cls = self.image_model(image_inputs) # N * X * Hi  N * Hi 
 
         if self.image_output_type == 'all':
-            image_encoder = image_encoder.contiguous().view(image_encoder.size(0), -1, image_encoder.size(1))
+            if len(image_encoder.shape) == 4:
+                image_encoder = image_encoder.contiguous().view(image_encoder.size(0), -1, image_encoder.size(1))
             image_encoder_init = self.image_change(image_encoder)
             image_cls_init = self.image_cls_change(image_cls)
             image_init = torch.cat((image_cls_init.unsqueeze(1), image_encoder_init), dim=1)
