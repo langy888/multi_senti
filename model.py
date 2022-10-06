@@ -118,8 +118,8 @@ class ImageModel(nn.Module):
         return 256
 
     def forward(self, images):
-        outputs = self.detr(images)
-        return outputs
+        outputs, img_f = self.detr(images)
+        return outputs, img_f
 
 
 class FuseModel(nn.Module):
