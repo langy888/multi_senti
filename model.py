@@ -209,7 +209,7 @@ class FuseModel(nn.Module):
 
         #extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
         #text_image_output = self.text_image_encoder(text_image_cat, text_image_cat, extended_attention_mask)
-        text_image_output = self.text_image_encoder(text_image_cat, text_image_cat, extended_attention_mask)
+        text_image_output = self.text_image_encoder(text_image_cat, text_image_cat, extended_attention_mask,1)
 
         fused_text_cls = text_image_output[:,0,:]
         fused_img_cls = text_image_output[:,-101,:]
