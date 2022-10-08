@@ -34,7 +34,7 @@ cla=0
 it=1
 tt=0
 ii=0
-ff=0
+ff=1
 
 run_type=1
 test_model_path=/output/checkpoint/

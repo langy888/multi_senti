@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: fuyubo-hmf-bert-vg-clatt-768-f
+  name: fuyubo-hmf-bert-detr-imgf-itff
 spec:
   restartPolicy: Never
   hostIPC: false

@@ -116,7 +116,7 @@ class Collate():
         if opt.image_output_type == 'cls':
             self.image_mask_num = 1
         elif opt.image_output_type == 'all':
-            self.image_mask_num = 50
+            self.image_mask_num = 101
 
     def __call__(self, batch_data):
         return self._collate(batch_data)
