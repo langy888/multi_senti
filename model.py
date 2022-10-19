@@ -12,13 +12,13 @@ from transformers import BertConfig, BertForPreTraining, AutoTokenizer, AutoMode
     ViTConfig, ViTModel, ViTFeatureExtractor
 import math
 import matplotlib.pyplot as plt
-from pre_model import RobertaEncoder, BertCrossEncoder, BertPooler
+from pre_model import *
 import copy
 #os.environ['TORCH_HOME'] = '../../pretrained_model/input/' #setting the environment variable
 
 
 class ModelParam:
-    def __init__(self, texts=None, images=None, bert_attention_mask=None, text_image_mask=None, segment_token=None, image_coordinate_position_token=None, emoji=None, hashtag=None):
+    def __init__(self, texts=None, images=None, bert_attention_mask=None, text_image_mask=None, segment_token=None, image_coordinate_position_token=None, emoji=None, hashtag=None, em_mask=None, hs_mask=None):
         self.texts = texts
         self.images = images
         self.bert_attention_mask = bert_attention_mask
@@ -27,8 +27,10 @@ class ModelParam:
         self.image_coordinate_position_token = image_coordinate_position_token
         self.emoji = emoji
         self.hashtag = hashtag
+        self.em_mask = em_mask
+        self.hs_mask = hs_mask
 
-    def set_data_param(self, texts=None, images=None, bert_attention_mask=None, text_image_mask=None, segment_token=None, image_coordinate_position_token=None, emoji=None, hashtag=None):
+    def set_data_param(self, texts=None, images=None, bert_attention_mask=None, text_image_mask=None, segment_token=None, image_coordinate_position_token=None, emoji=None, hashtag=None, em_mask=None, hs_mask=None):
         self.texts = texts
         self.images = images
         self.bert_attention_mask = bert_attention_mask
@@ -37,40 +39,8 @@ class ModelParam:
         self.image_coordinate_position_token = image_coordinate_position_token
         self.emoji = emoji
         self.hashtag = hashtag
-
-
-def get_extended_attention_mask(attention_mask, input_shape):
-    """
-    Makes broadcastable attention and causal masks so that future and masked tokens are ignored.
-
-    Arguments:
-        attention_mask (:obj:`torch.Tensor`):
-            Mask with ones indicating tokens to attend to, zeros for tokens to ignore.
-        input_shape (:obj:`Tuple[int]`):
-            The shape of the input to the model.
-
-    Returns:
-        :obj:`torch.Tensor` The extended attention mask, with a the same dtype as :obj:`attention_mask.dtype`.
-    """
-    # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
-    # ourselves in which case we just need to make it broadcastable to all heads.
-    if attention_mask.dim() == 3:
-        extended_attention_mask = attention_mask[:, None, :, :]
-    elif attention_mask.dim() == 2:
-        extended_attention_mask = attention_mask[:, None, None, :]
-    else:
-        raise ValueError(
-            f"Wrong shape for input_ids (shape {input_shape}) or attention_mask (shape {attention_mask.shape})"
-        )
-
-    # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
-    # masked positions, this operation will create a tensor which is 0.0 for
-    # positions we want to attend and -10000.0 for masked positions.
-    # Since we are adding it to the raw scores before the softmax, this is
-    # effectively the same as removing these entirely.
-    extended_attention_mask = extended_attention_mask.to(dtype=torch.float32)  # fp16 compatibility
-    extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
-    return extended_attention_mask
+        self.em_mask = em_mask
+        self.hs_mask = hs_mask
 
 
 class ActivateFun(nn.Module):
@@ -201,27 +171,26 @@ class FuseModel(nn.Module):
         self.text_model = TextModel(opt)
         self.image_model = ImageModel(opt)
 
-        self.text_config = copy.deepcopy(self.text_model.get_config())
-        self.image_config = copy.deepcopy(self.text_model.get_config())
+        #self.text_image_encoder = BertCSEncoder(opt.tran_dim, opt.concat_att, opt.cross_coatt, opt.self_coatt, 3)
+        self.text_image_encoder = BertSSEncoder(opt.tran_dim, 3)
+        
+        #self.ti_cross = BertCrossEncoder(opt.tran_dim, 3)
+        #self.it_cross = BertCrossEncoder(opt.tran_dim, 3)
+        #self.text_image_encoder = BertCrossEncoder(opt.tran_dim, 3)
 
-        self.text_config.num_attention_heads = opt.tran_dim // 64
-        self.text_config.hidden_size = opt.tran_dim
-        self.text_config.num_hidden_layers = opt.tran_num_layers
+        self.cross_coatt = opt.cross_coatt
+        self.self_coatt = opt.self_coatt
+        self.image_encoder = BertCrossEncoder(opt.tran_dim, 1)
 
-        self.image_config.num_attention_heads = opt.tran_dim // 64
-        self.image_config.hidden_size = opt.tran_dim
-        self.image_config.num_hidden_layers = opt.image_num_layers
-
-        if self.text_config.is_decoder:
-            self.use_cache = self.text_config.use_cache
-        else:
-            self.use_cache = False
-
-        self.text_image_encoder = RobertaEncoder(self.text_config)
-        self.image_encoder = RobertaEncoder(self.image_config)
-
-        # self.text_image_encoder = BertCrossEncoder(opt.tran_dim, 5)
-        # self.image_encoder = BertCrossEncoder(opt.tran_dim, 1)
+        # self.tanh = torch.nn.Tanh()
+        # self.hs_change = nn.Sequential(
+        #     nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
+        #     ActivateFun(opt)
+        # )
+        # self.em_change = nn.Sequential(
+        #     nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
+        #     ActivateFun(opt)
+        # )
 
         self.text_change = nn.Sequential(
             nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
@@ -243,21 +212,13 @@ class FuseModel(nn.Module):
         )
 
         self.ftext_cls_change = nn.Sequential(
-            nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
+            nn.Linear(opt.tran_dim, opt.tran_dim),
             ActivateFun(opt)
         )
         self.fimage_cls_change = nn.Sequential(
-            nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
+            nn.Linear(opt.tran_dim, opt.tran_dim),
             ActivateFun(opt)
         )
-
-        self.transformer_embedding_layernorm = nn.Sequential(
-            nn.LayerNorm(opt.tran_dim),
-            nn.Dropout(opt.l_dropout)
-        )
-
-        transformer_encoder_layer = nn.TransformerEncoderLayer(d_model=opt.tran_dim, nhead=opt.tran_dim//64, dim_feedforward=opt.tran_dim * 4)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer=transformer_encoder_layer, num_layers=opt.tran_num_layers)
 
         if self.fuse_type == 'att':
             self.output_attention = nn.Sequential(
@@ -273,8 +234,9 @@ class FuseModel(nn.Module):
             nn.Linear(opt.tran_dim // 2, 3)
         )
 
-    def forward(self, text_inputs, bert_attention_mask, image_inputs, text_image_mask, emoji, hashtag):
-        #text_inputs = torch.cat((text_inputs, hashtag, emoji), dim=1)
+    def forward(self, text_inputs, bert_attention_mask, image_inputs, text_image_mask, emoji, hashtag, em_mask, hs_mask):
+        #text_inputs = torch.cat((text_inputs, emoji, hashtag), dim=1)
+        #text_inputs = torch.cat((text_inputs, hashtag), dim=1)
         #text_inputs = torch.cat((text_inputs, emoji), dim=1)
         assert text_inputs.size(0) == bert_attention_mask.size(0)
         text_encoder = self.text_model(text_inputs, attention_mask=bert_attention_mask)
@@ -293,48 +255,49 @@ class FuseModel(nn.Module):
             image_cls_init = self.image_cls_change(image_cls)
             image_init = image_cls_init.unsqueeze(1)
 
+        extended_attention_mask = get_extended_attention_mask(text_image_mask, image_init.size())
+
         image_mask = text_image_mask[:, -image_init.size(1):]
-        extended_attention_mask = get_extended_attention_mask(image_mask, image_init.size())
+        image_extended_attention_mask = get_extended_attention_mask(image_mask, image_init.size())
 
-        #image_init = self.image_encoder(image_init, image_init, extended_attention_mask)
-        #text_image_cat = torch.cat((text_init, image_init), dim=1)
-        #extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
-        #text_image_output = self.text_image_encoder(text_image_cat, text_image_cat, extended_attention_mask)
+        text_mask =  text_image_mask[:, :-image_init.size(1)]
+        text_extended_attention_mask = get_extended_attention_mask(text_mask, text_inputs.size())
 
-        image_init = self.image_encoder(image_init,
-                                             attention_mask=None,
-                                             head_mask=None,
-                                             encoder_hidden_states=None,
-                                             encoder_attention_mask=extended_attention_mask,
-                                             past_key_values=None,
-                                             use_cache=self.use_cache,
-                                             output_attentions=self.text_config.output_attentions,
-                                             output_hidden_states=(self.text_config.output_hidden_states),
-                                             return_dict=self.text_config.use_return_dict
-                                             )
-        image_init = image_init.last_hidden_state
+        image_init = self.image_encoder(image_init, image_init, image_extended_attention_mask)
 
+        # hashtag_encoder = self.text_model(hashtag, attention_mask=hs_mask).last_hidden_state
+        # emoji_encoder = self.text_model(emoji, attention_mask=em_mask).last_hidden_state
+        # hashtag_encoder = self.text_change(hashtag_encoder)
+        # emoji_encoder = self.text_change(emoji_encoder)
+        # Chs = self.tanh(torch.matmul(text_init, hashtag_encoder.transpose(1,2)))
+        # Chs, _ = torch.max(Chs, dim=1)
+        # attnhs = F.softmax(Chs, dim=-1)
+        # hashtag_text_cross_attn = torch.matmul(attnhs.unsqueeze(1), hashtag_encoder)
+        # Cem = self.tanh(torch.matmul(text_init, emoji_encoder.transpose(1,2)))
+        # Cem, _ = torch.max(Cem, dim=1)
+        # attnem = F.softmax(Cem, dim=-1)
+        # hashtag_text_cross_attn = torch.matmul(attnem.unsqueeze(1), emoji_encoder)
+
+        ##### selfatt
         text_image_cat = torch.cat((text_init, image_init), dim=1)
+        text_image_output = self.text_image_encoder(text_image_cat, extended_attention_mask)
 
-        extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_image_mask, text_inputs.size())
-        text_image_transformer = self.text_image_encoder(text_image_cat,
-                                                 attention_mask=extended_attention_mask,
-                                                 head_mask=None,
-                                                 encoder_hidden_states=None,
-                                                 encoder_attention_mask=extended_attention_mask,
-                                                 past_key_values=None,
-                                                 use_cache=self.use_cache,
-                                                 output_attentions=self.text_config.output_attentions,
-                                                 output_hidden_states=(self.text_config.output_hidden_states),
-                                                 return_dict=self.text_config.use_return_dict)
-        text_image_output = text_image_transformer.last_hidden_state
+        # text_f, img_f = self.text_image_encoder(text_init, image_init, text_extended_attention_mask, image_extended_attention_mask,  extended_attention_mask)
+        # text_image_output = torch.cat((text_f, img_f), dim=1)
 
-
+        # # text_f = self.ti_cross(text_init, image_init, image_extended_attention_mask, self.cross_coatt)
+        # # img_f = self.it_cross(image_init, text_init, text_extended_attention_mask, self.cross_coatt)
+        # # text_image_output = torch.cat((text_f, img_f), dim=1)
+        # # self.text_image_encoder(text_image_output, text_image_output, extended_attention_mask, self.self_coatt)
+    
+        # fused_text_cls = text_f[:,0,:]
+        # fused_img_cls = img_f[:,0,:]
         fused_text_cls = text_image_output[:,0,:]
         fused_img_cls = text_image_output[:,-50,:]
 
         fused_text_cls = self.ftext_cls_change(fused_text_cls)
         fused_img_cls = self.fimage_cls_change(fused_img_cls)
+
 
         text_image_alpha = self.output_attention(text_image_output)
         text_image_alpha = text_image_alpha.squeeze(-1).masked_fill(text_image_mask == 0, -1e9)
@@ -350,7 +313,6 @@ class CLModel(nn.Module):
         self.fuse_model = FuseModel(opt)
         self.temperature = opt.temperature
         self.set_cuda = opt.cuda
-        self.clloss = 1
         self.cll = opt.cll
         self.it_cl = opt.it
         self.cla = opt.cla
@@ -382,13 +344,15 @@ class CLModel(nn.Module):
     def forward(self, data_orgin: ModelParam, data_augment: ModelParam = None, labels=None, target_labels=None):
         orgin_res, orgin_text_cls, orgin_image_cls, ftext, fimage = self.fuse_model(data_orgin.texts, data_orgin.bert_attention_mask,
                                                                      data_orgin.images, data_orgin.text_image_mask,
-                                                                     data_orgin.emoji, data_orgin.hashtag)
+                                                                     data_orgin.emoji, data_orgin.hashtag,
+                                                                     data_orgin.em_mask, data_orgin.hs_mask)
         output = self.output_classify(orgin_res)
 
         if data_augment:
             augment_res, augment_text_cls, augment_image_cls,_ ,_ = self.fuse_model(data_augment.texts, data_augment.bert_attention_mask,
                                                                             data_augment.images, data_augment.text_image_mask,
-                                                                            data_augment.emoji, data_augment.hashtag)
+                                                                            data_orgin.emoji, data_orgin.hashtag,
+                                                                            data_orgin.em_mask, data_orgin.hs_mask)
             augment_res_change = self.augment_linear_change(augment_res)
             orgin_res_change = self.orgin_linear_change(orgin_res)
 

@@ -32,18 +32,26 @@ class SentenceDataset(Dataset):
         self.image_transforms = image_transforms
 
         file_content = json.load(open(data_path, 'r', encoding='utf-8'))
+        with open("/output/dataset/data/HFM/clean_image_text.json") as f:
+            id2text = json.load(f)
+
 
         self.data_id_list = []
         self.text_list = []
         self.label_list = []
         self.emoji_list = []
         self.hashtag_list = []
+        self.ocrtext = []
         for data in file_content:
             self.data_id_list.append(data['id'])
             self.text_list.append(data['text'])
             self.label_list.append(data['emotion_label'])
             self.emoji_list.append(data['emoji'])
             self.hashtag_list.append(data['hashtag'])
+            if data['id'] in id2text:
+                self.ocrtext.append(id2text[data['id']])
+            else:
+                self.ocrtext.append("")
 
 
         self.image_id_list = self.data_id_list
@@ -81,6 +89,13 @@ class SentenceDataset(Dataset):
                                 self.hashtag_token_list]
         self.hashtag_to_id = [text_tokenizer.convert_tokens_to_ids(text_token) for text_token in
                            tqdm(self.hashtag_token_list, desc='convert hashtag to id')]
+        
+        ##ocrtext
+        self.ocr_token_list = [text_tokenizer.tokenize('[CLS]' + text + '[SEP]') for text in tqdm(self.ocrtext, desc='convert ocr to token')]
+        self.ocr_token_list = [text if len(text) < opt.max_else_length else text[0: opt.max_else_length] for text in
+                                self.ocr_token_list]
+        self.ocr_to_id = [text_tokenizer.convert_tokens_to_ids(text_token) for text_token in
+                           tqdm(self.ocr_token_list, desc='convert ocr to id')]
 
     def get_data_id_list(self):
         return self.data_id_list
@@ -99,7 +114,7 @@ class SentenceDataset(Dataset):
             image_augment = copy.deepcopy(image_read)
             image_augment = self.image_transforms(image_augment)
         return self.text_to_id[index], image_origin, self.label_list[index], self.aug_text_ids[self.data_id_list[index]], image_augment,\
-            self.emoji_to_id[index], self.hashtag_to_id[index]
+            self.emoji_to_id[index], self.hashtag_to_id[index], self.ocr_to_id[index]
 
 
 class Collate():
@@ -129,6 +144,7 @@ class Collate():
         image_augment = torch.FloatTensor([np.array(b[4]) for b in batch_data])
         emoji_ids = [torch.LongTensor(b[5]) for b in batch_data]
         hashtag_ids = [torch.LongTensor(b[6]) for b in batch_data]
+        ocr_ids = [torch.LongTensor(b[7]) for b in batch_data]
 
         data_len = [text.size(0) for text in text_to_id]
         aug_data_len = [text.size(0) for text in aug_text_ids]
@@ -143,8 +159,12 @@ class Collate():
             aug_text_ids[0] = torch.cat((aug_text_ids[0], torch.LongTensor([0] * (self.min_length - aug_text_ids[0].size(0)))))
             aug_max_len = self.min_length
 
+
         emoji_len = [text.size(0) for text in emoji_ids]
         hashtag_len = [text.size(0) for text in hashtag_ids]
+        ocr_len = [text.size(0) for text in ocr_ids]
+        max_ocr_len = max(ocr_len)
+        ocr_ids = run_utils.pad_sequence(ocr_ids, batch_first=True, padding_value=0)
 
         max_emoji_len = max(emoji_len)
         max_hashtag_len = max(hashtag_len)
@@ -157,31 +177,43 @@ class Collate():
 
         bert_attention_mask = []
         text_image_mask = []
-        for length, el, htl in zip(data_len, emoji_len, hashtag_len):
+        for length, el, htl, ol in zip(data_len, emoji_len, hashtag_len, ocr_len):
             text_mask_cell = [1] * length
             text_mask_cell.extend([0] * (max_len - length))
-            #text_mask_cell.extend([1] * el)
-            #text_mask_cell.extend([0] * (max_emoji_len - el))
-            #text_mask_cell.extend([1] * htl)
-            #text_mask_cell.extend([0] * (max_hashtag_len - htl))
+            # text_mask_cell.extend([1] * el)
+            # text_mask_cell.extend([0] * (max_emoji_len - el))
+            # text_mask_cell.extend([1] * htl)
+            # text_mask_cell.extend([0] * (max_hashtag_len - htl)) 
             bert_attention_mask.append(text_mask_cell[:])
 
             text_mask_cell.extend([1] * self.image_mask_num)
+            # text_mask_cell.extend([1] * htl)
+            # text_mask_cell.extend([0] * (max_emoji_len - htl)) 
             text_image_mask.append(text_mask_cell[:])
 
         tran_bert_attention_mask = []
         tran_text_image_mask = []
-        for length, el, htl in zip(aug_data_len, emoji_len, hashtag_len):
+        for length, el, htl, ol in zip(aug_data_len, emoji_len, hashtag_len, ocr_len):
             text_mask_cell = [1] * length
             text_mask_cell.extend([0] * (aug_max_len - length))
-            #text_mask_cell.extend([1] * el)
-            #text_mask_cell.extend([0] * (max_emoji_len - el))
-            #text_mask_cell.extend([1] * htl)
-            #text_mask_cell.extend([0] * (max_hashtag_len - htl))
+            # text_mask_cell.extend([1] * el)
+            # text_mask_cell.extend([0] * (max_emoji_len - el))
+            # text_mask_cell.extend([1] * htl)
+            # text_mask_cell.extend([0] * (max_hashtag_len - htl))
             tran_bert_attention_mask.append(text_mask_cell[:])
 
             text_mask_cell.extend([1] * self.image_mask_num)
             tran_text_image_mask.append(text_mask_cell[:])
+
+        hs_attention_mask = []
+        em_attention_mask = []
+        # for el, htl in zip(emoji_len, hashtag_len):
+        #     hs_mask_cell = [1] * htl
+        #     em_mask_cell = [1] * el
+        #     em_mask_cell.extend([0] * (max_emoji_len - el))
+        #     hs_mask_cell.extend([0] * (max_hashtag_len - htl))
+        #     hs_attention_mask.append(hs_mask_cell[:])
+        #     em_attention_mask.append(em_mask_cell[:])
 
         temp_labels = [label - 0, label - 1, label - 2]
         target_labels = []
@@ -194,7 +226,7 @@ class Collate():
 
         return text_to_id, torch.LongTensor(bert_attention_mask), image_origin, torch.LongTensor(text_image_mask), label, \
                aug_text_ids, torch.LongTensor(tran_bert_attention_mask), image_augment, torch.LongTensor(tran_text_image_mask), target_labels, \
-                emoji_ids, hashtag_ids
+                emoji_ids, hashtag_ids, torch.LongTensor(em_attention_mask), torch.LongTensor(hs_attention_mask)
 
 
 def get_resize(image_size):

@@ -88,7 +88,7 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
         for index, data in enumerate(train_loader_tqdm):
             texts_origin, bert_attention_mask, image_origin, text_image_mask, labels,\
                 texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, target_labels, \
-                    emoji_ids, hashtag_ids = data
+                    emoji_ids, hashtag_ids, em_mask, hs_mask = data
 
             if opt.cuda is True:
                 texts_origin = texts_origin.cuda()
@@ -102,11 +102,14 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
                 text_image_mask_augment = text_image_mask_augment.cuda()
                 emoji_ids = emoji_ids.cuda()
                 hashtag_ids = hashtag_ids.cuda()
+                if em_mask != []:
+                    em_mask = em_mask.cuda()
+                    hs_mask = hs_mask.cuda()
                 for i in range(len(target_labels)):
                     target_labels[i] = target_labels[i].cuda()
 
-            orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin, text_image_mask=text_image_mask, emoji=emoji_ids, hashtag=hashtag_ids)
-            augment_param.set_data_param(texts=texts_augment, bert_attention_mask=bert_attention_mask_augment, images=image_augment, text_image_mask=text_image_mask_augment, emoji=emoji_ids, hashtag=hashtag_ids)
+            orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin, text_image_mask=text_image_mask, emoji=emoji_ids, hashtag=hashtag_ids, em_mask=em_mask, hs_mask=hs_mask)
+            augment_param.set_data_param(texts=texts_augment, bert_attention_mask=bert_attention_mask_augment, images=image_augment, text_image_mask=text_image_mask_augment)
 
             origin_res, cl_self_loss, cl_loss, other_loss = cl_model(orgin_param, augment_param, labels, target_labels)
 

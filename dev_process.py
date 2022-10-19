@@ -33,7 +33,7 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
         step_num = 0
         for index, data in enumerate(dev_loader_tqdm):
             texts_origin, bert_attention_mask, image_origin, text_image_mask, labels, \
-            texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _, emoji_ids, hashtag_ids = data
+            texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _, emoji_ids, hashtag_ids, em_mask, hs_mask  = data
             # continue
 
             if opt.cuda is True:
@@ -44,8 +44,11 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
                 labels = labels.cuda()
                 emoji_ids = emoji_ids.cuda()
                 hashtag_ids = hashtag_ids.cuda()
+                if em_mask != []:
+                    em_mask = em_mask.cuda()
+                    hs_mask = hs_mask.cuda()
             orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin,
-                                       text_image_mask=text_image_mask, emoji=emoji_ids, hashtag=hashtag_ids)
+                                       text_image_mask=text_image_mask, emoji=emoji_ids, hashtag=hashtag_ids, em_mask=em_mask, hs_mask=hs_mask)
             origin_res = cl_model(orgin_param)
 
             loss = critertion(origin_res, labels) / opt.acc_batch_size
