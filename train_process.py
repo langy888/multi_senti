@@ -102,9 +102,8 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
                 text_image_mask_augment = text_image_mask_augment.cuda()
                 emoji_ids = emoji_ids.cuda()
                 hashtag_ids = hashtag_ids.cuda()
-                if em_mask != []:
-                    em_mask = em_mask.cuda()
-                    hs_mask = hs_mask.cuda()
+                em_mask = em_mask.cuda()
+                hs_mask = hs_mask.cuda()
                 for i in range(len(target_labels)):
                     target_labels[i] = target_labels[i].cuda()
 

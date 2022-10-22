@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: fuyubo-hmf-bertss-512
+  name: fuyubo-hmf-bertcs-256-hsemcross
 spec:
   restartPolicy: Never
   hostIPC: false

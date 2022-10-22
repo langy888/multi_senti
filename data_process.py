@@ -32,8 +32,12 @@ class SentenceDataset(Dataset):
         self.image_transforms = image_transforms
 
         file_content = json.load(open(data_path, 'r', encoding='utf-8'))
-        with open("/output/dataset/data/HFM/clean_image_text.json") as f:
-            id2text = json.load(f)
+        if opt.debug:
+            with open("/mnt/lustre/sensebee/backup/fuyubo1/multi_senti/CLMLF1/dataset/data/HFM/clean_image_text.json") as f:
+                id2text = json.load(f)
+        else:           
+            with open("/output/dataset/data/HFM/clean_image_text.json") as f:
+                id2text = json.load(f)
 
 
         self.data_id_list = []
@@ -207,13 +211,13 @@ class Collate():
 
         hs_attention_mask = []
         em_attention_mask = []
-        # for el, htl in zip(emoji_len, hashtag_len):
-        #     hs_mask_cell = [1] * htl
-        #     em_mask_cell = [1] * el
-        #     em_mask_cell.extend([0] * (max_emoji_len - el))
-        #     hs_mask_cell.extend([0] * (max_hashtag_len - htl))
-        #     hs_attention_mask.append(hs_mask_cell[:])
-        #     em_attention_mask.append(em_mask_cell[:])
+        for el, htl in zip(emoji_len, hashtag_len):
+            hs_mask_cell = [1] * htl
+            em_mask_cell = [1] * el
+            em_mask_cell.extend([0] * (max_emoji_len - el))
+            hs_mask_cell.extend([0] * (max_hashtag_len - htl))
+            hs_attention_mask.append(hs_mask_cell[:])
+            em_attention_mask.append(em_mask_cell[:])
 
         temp_labels = [label - 0, label - 1, label - 2]
         target_labels = []

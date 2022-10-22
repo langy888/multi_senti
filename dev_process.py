@@ -44,9 +44,8 @@ def dev_process(opt, critertion, cl_model, dev_loader, test_loader=None, last_F1
                 labels = labels.cuda()
                 emoji_ids = emoji_ids.cuda()
                 hashtag_ids = hashtag_ids.cuda()
-                if em_mask != []:
-                    em_mask = em_mask.cuda()
-                    hs_mask = hs_mask.cuda()
+                em_mask = em_mask.cuda()
+                hs_mask = hs_mask.cuda()
             orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin,
                                        text_image_mask=text_image_mask, emoji=emoji_ids, hashtag=hashtag_ids, em_mask=em_mask, hs_mask=hs_mask)
             origin_res = cl_model(orgin_param)

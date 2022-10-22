@@ -209,7 +209,10 @@ if __name__ == '__main__':
     if opt.cuda and opt.gpu_num > 1 and dist.get_rank() == 0:
         opt.save_model_path = WriteFile(opt.save_model_path, 'train_correct_log.txt', str(opt) + '\n\n', 'a+', change_file_name=True)
     log_summary_writer = None
-    log_summary_writer = SummaryWriter(log_dir=opt.save_model_path)
+    if opt.debug:
+        log_summary_writer = SummaryWriter(log_dir="/mnt//lustre/sensebee/backup/fuyubo1/multi_senti/debug")
+    else:
+        log_summary_writer = SummaryWriter(log_dir=opt.save_model_path)
     log_summary_writer.add_text('Hyperparameter', str(opt), global_step=1)
     log_summary_writer.flush()
 

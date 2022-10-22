@@ -12,9 +12,9 @@ warmup_step_epoch=2
 fuse_type=att
 batch=128
 acc_grad=8
-tran_num_layers=5
+tran_num_layers=4
 image_num_layers=1
-tran_dim=512
+tran_dim=256
 
 fixed_image_model=0
 no_extra_img_trans=0
