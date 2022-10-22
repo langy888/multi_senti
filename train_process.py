@@ -112,10 +112,10 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
 
             classify_loss = critertion(origin_res, labels)
             #cl_loss = critertion(l_pos_neg, cl_lables)
-            it_loss, tt_loss, ii_loss, ff_loss = other_loss
+            it_loss, tt_loss, ii_loss, ff_loss, sff_loss = other_loss
 
-            loss = (classify_loss + cl_loss * opt.cl_loss_alpha + cl_self_loss * opt.cl_self_loss_alpha\
-                + it_loss + tt_loss + ii_loss + ff_loss) / opt.acc_batch_size
+            loss = sff_loss + (classify_loss + cl_loss * opt.cl_loss_alpha + cl_self_loss * opt.cl_self_loss_alpha\
+                + it_loss + tt_loss + ii_loss + ff_loss ) / opt.acc_batch_size 
             loss.backward()
             if not opt.cuda or dist.get_rank() == 0 :
                 train_loader_tqdm.set_description("Train Iteration, loss: %.6f, lr: %e" %

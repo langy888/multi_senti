@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: fuyubo-hmf-cat-cross0-self1-vit32-51
+  name: fuyubo-hmf-cat-cross0-self1-256-ds-tt-sa-all1
 spec:
   restartPolicy: Never
   hostIPC: false

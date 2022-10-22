@@ -165,6 +165,7 @@ class FuseModel(nn.Module):
         self.image_output_type = opt.image_output_type
         self.zoom_value = math.sqrt(opt.tran_dim)
         self.save_image_index = 0
+        self.sff_type = opt.sff_type
 
         self.text_model = TextModel(opt)
         self.image_model = ImageModel(opt)
@@ -199,16 +200,29 @@ class FuseModel(nn.Module):
         )
 
         self.ftext_cls_change = nn.Sequential(
-            nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
+            nn.Linear(opt.tran_dim, opt.tran_dim),
             ActivateFun(opt)
         )
-        self.fimage_cls_change = nn.Sequential(
-            nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
-            ActivateFun(opt)
-        )
+        # self.fimage_cls_change = nn.Sequential(
+        #     nn.Linear(opt.tran_dim, opt.tran_dim),
+        #     ActivateFun(opt)
+        # )
 
-        self.linear_output_change = nn.Sequential(
-            nn.Linear(self.text_model.get_output_dim()+self.image_model.get_output_dim()+opt.tran_dim, opt.tran_dim),
+        self.ftext_cls_change1 = nn.Sequential(
+            nn.Linear(opt.tran_dim, opt.tran_dim),
+            ActivateFun(opt)
+        )
+        # self.fimage_cls_change1 = nn.Sequential(
+        #     nn.Linear(opt.tran_dim, opt.tran_dim),
+        #     ActivateFun(opt)
+        # )
+
+        self.dchange = nn.Sequential(
+            nn.Linear(opt.tran_dim, opt.tran_dim),
+            ActivateFun(opt)
+        )
+        self.schange = nn.Sequential(
+            nn.Linear(opt.tran_dim, opt.tran_dim),
             ActivateFun(opt)
         )
 
@@ -220,12 +234,18 @@ class FuseModel(nn.Module):
         transformer_encoder_layer = nn.TransformerEncoderLayer(d_model=opt.tran_dim, nhead=opt.tran_dim//64, dim_feedforward=opt.tran_dim * 4)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer=transformer_encoder_layer, num_layers=opt.tran_num_layers)
 
-        if self.fuse_type == 'att':
+        if self.sff_type == 'cat':
+            self.output_attention = nn.Sequential(
+                nn.Linear(2 * opt.tran_dim, opt.tran_dim),
+                ActivateFun(opt),
+                nn.Linear(opt.tran_dim, 1)
+            )
+        else:
             self.output_attention = nn.Sequential(
                 nn.Linear(opt.tran_dim, opt.tran_dim // 2),
                 ActivateFun(opt),
                 nn.Linear(opt.tran_dim // 2, 1)
-            )
+            )            
 
         self.output_classify = nn.Sequential(
             nn.Dropout(opt.l_dropout),
@@ -276,20 +296,36 @@ class FuseModel(nn.Module):
         # text_image_output = torch.cat((text_f, img_f), dim=1)
         # self.text_image_encoder(text_image_output, text_image_output, extended_attention_mask, self.self_coatt)
     
-
         fused_text_cls = text_f[:,0,:]
         fused_img_cls = img_f[:,0,:]
 
         fused_text_cls = self.ftext_cls_change(fused_text_cls)
-        fused_img_cls = self.fimage_cls_change(fused_img_cls)
+        fused_img_cls = self.ftext_cls_change(fused_img_cls)
 
-
+        sfused_text_cls = self.ftext_cls_change1(fused_text_cls)
+        sfused_img_cls = self.ftext_cls_change1(fused_img_cls)
+ 
         text_image_alpha = self.output_attention(text_image_output)
         text_image_alpha = text_image_alpha.squeeze(-1).masked_fill(text_image_mask == 0, -1e9)
         text_image_alpha = torch.softmax(text_image_alpha, dim=-1)
         text_image_output = (text_image_alpha.unsqueeze(-1) * text_image_output).sum(dim=1)
+      
 
-        return text_image_output, text_cls_init, image_cls_init, fused_text_cls, fused_img_cls
+        # if self.sff_type == "add":
+        #     fused_output = dtext_image_output + stext_image_output
+        # elif self.sff_type == "cat":
+        #     fused_output = torch.cat((dtext_image_output, stext_image_output),dim=-1)
+        # elif self.sff_type == "avg":
+        #     fused_output = (dtext_image_output + stext_image_output) / 2 
+        # elif self.sff_type == "max":
+        #     fused_output = torch.where(dtext_image_output > stext_image_output, dtext_image_output, stext_image_output)
+
+        # text_image_alpha = self.output_attention(fused_output)
+        # text_image_alpha = text_image_alpha.squeeze(-1).masked_fill(text_image_mask == 0, -1e9)
+        # text_image_alpha = torch.softmax(text_image_alpha, dim=-1)
+        # fused_output = (text_image_alpha.unsqueeze(-1) * fused_output).sum(dim=1)
+
+        return text_image_output, text_cls_init, image_cls_init, fused_text_cls, fused_img_cls, sfused_text_cls, sfused_img_cls
 
 
 class CLModel(nn.Module):
@@ -304,39 +340,56 @@ class CLModel(nn.Module):
         self.tt_cla = opt.tt
         self.ii_cla = opt.ii
         self.ff_cl = opt.ff
+        self.sff_cl = opt.sff
         #self.mmt
         self.critertion = nn.CrossEntropyLoss()
 
-        self.orgin_linear_change = nn.Sequential(
-            nn.Linear(opt.tran_dim, opt.tran_dim),
-            ActivateFun(opt),
-            nn.Linear(opt.tran_dim, opt.tran_dim)
-        )
+        if opt.sff_type == "cat":
 
-        self.augment_linear_change = nn.Sequential(
-            nn.Linear(opt.tran_dim, opt.tran_dim),
-            ActivateFun(opt),
-            nn.Linear(opt.tran_dim, opt.tran_dim)
-        )
+            self.orgin_linear_change = nn.Sequential(
+                nn.Linear(2 * opt.tran_dim, 2 * opt.tran_dim),
+                ActivateFun(opt),
+                nn.Linear(2 * opt.tran_dim, 2 * opt.tran_dim)
+            )
+            self.output_classify = nn.Sequential(
+                nn.Dropout(opt.l_dropout),
+                nn.Linear(2 * opt.tran_dim, opt.tran_dim),
+                ActivateFun(opt),
+                nn.Linear(opt.tran_dim, 3)
+            )
 
-        self.output_classify = nn.Sequential(
-            nn.Dropout(opt.l_dropout),
-            nn.Linear(opt.tran_dim, opt.tran_dim // 2),
-            ActivateFun(opt),
-            nn.Linear(opt.tran_dim // 2, 3)
-        )
+        else:
+
+            self.orgin_linear_change = nn.Sequential(
+                nn.Linear(opt.tran_dim, opt.tran_dim),
+                ActivateFun(opt),
+                nn.Linear(opt.tran_dim, opt.tran_dim)
+            )
+            self.output_classify = nn.Sequential(
+                nn.Dropout(opt.l_dropout),
+                nn.Linear(opt.tran_dim, opt.tran_dim // 2),
+                ActivateFun(opt),
+                nn.Linear(opt.tran_dim // 2, 3)
+            )
+
+        # self.augment_linear_change = nn.Sequential(
+        #     nn.Linear(opt.tran_dim, opt.tran_dim),
+        #     ActivateFun(opt),
+        #     nn.Linear(opt.tran_dim, opt.tran_dim)
+        # )
+
 
     def forward(self, data_orgin: ModelParam, data_augment: ModelParam = None, labels=None, target_labels=None):
-        orgin_res, orgin_text_cls, orgin_image_cls, ftext, fimage = self.fuse_model(data_orgin.texts, data_orgin.bert_attention_mask,
+        orgin_res, orgin_text_cls, orgin_image_cls, ftext, fimage, sftext, sfimage = self.fuse_model(data_orgin.texts, data_orgin.bert_attention_mask,
                                                                      data_orgin.images, data_orgin.text_image_mask,
                                                                      data_orgin.emoji, data_orgin.hashtag)
         output = self.output_classify(orgin_res)
 
         if data_augment:
-            augment_res, augment_text_cls, augment_image_cls,_ ,_ = self.fuse_model(data_augment.texts, data_augment.bert_attention_mask,
-                                                                            data_augment.images, data_augment.text_image_mask,
-                                                                            data_augment.emoji, data_augment.hashtag)
-            augment_res_change = self.augment_linear_change(augment_res)
+            # augment_res, augment_text_cls, augment_image_cls ,_ ,_ , _ ,_= self.fuse_model(data_augment.texts, data_augment.bert_attention_mask,
+            #                                                                 data_augment.images, data_augment.text_image_mask,
+            #                                                                 data_augment.emoji, data_augment.hashtag)
+            # augment_res_change = self.augment_linear_change(augment_res)
             orgin_res_change = self.orgin_linear_change(orgin_res)
 
             cla_loss = 0
@@ -403,6 +456,19 @@ class CLModel(nn.Module):
                 fit_pos_neg /= self.temperature   
                 ff_loss = self.critertion(fit_pos_neg, fit_cl_lables)
 
+            sff_loss = 0
+            if self.sff_cl:
+                fit_pos_neg = torch.mm(sftext, sfimage.T) #orgin_text_cls, orgin_image_cls
+                fit_cl_lables = torch.arange(fit_pos_neg.size(0))
+
+                masks_weight = (labels != 1).float()
+                if self.set_cuda:
+                    fit_cl_lables = fit_cl_lables.cuda()
+                    masks_weight = masks_weight.cuda()
+                fit_pos_neg /= self.temperature   
+                sff_cri = torch.nn.CrossEntropyLoss(weight=masks_weight,size_average=True)
+                ff_loss = sff_cri(fit_pos_neg, fit_cl_lables)
+
             # if self.fo_cl:
             #     tt_pos_neg = torch.mm(ftext, orgin_image_cls.T)
             #     tt_cl_lables = torch.arange(tt_pos_neg.size(0))
@@ -419,7 +485,7 @@ class CLModel(nn.Module):
             #     ii_loss = self.critertion(ii_pos_neg, ii_cl_lables) 
 
 
-            return output, cl_self_loss, cla_loss, (it_loss, tt_loss, ii_loss, ff_loss)
+            return output, cl_self_loss, cla_loss, (it_loss, tt_loss, ii_loss, ff_loss, sff_loss)
         else:
             return output
 
