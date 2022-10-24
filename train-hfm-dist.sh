@@ -35,8 +35,8 @@ it=1
 tt=0
 ii=0
 ff=1
-sff=1
-sff_type=avg
+sff=0
+sff_type=cat
 
 concat_att=1
 cross_coatt=0
