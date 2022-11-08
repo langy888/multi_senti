@@ -26,6 +26,9 @@ from torch.nn.parallel import DistributedDataParallel
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
+    parse.add_argument('-ff_decompose',  default=0, type=int)
+    parse.add_argument('-it_decompose',  default=1, type=int)
+    parse.add_argument('-fusion_model', type=str, default='ss')
     parse.add_argument('-sff_type', type=str, default='add')
     parse.add_argument('-sff', default=0, type=int)
     parse.add_argument('-concat_att', default=0, type=int)

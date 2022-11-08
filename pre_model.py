@@ -278,3 +278,25 @@ class BertCSEncoder(nn.Module):
         for layer_module in self.layer:
             text_f, image_f = layer_module(text_f, image_f, text_m, image_m, text_image_m)
         return text_f, image_f
+
+class BertSSBlock(nn.Module):
+    def __init__(self, bert_dim):
+        super(BertSSBlock, self).__init__()
+        self.layer1 = BertCrossAttentionLayer(bert_dim)
+        self.layer2 = BertCrossAttentionLayer(bert_dim)        
+
+    def forward(self, text_image, text_image_m):
+        it_coatt = self.layer1(text_image, text_image, text_image_m, 0) #N Li H
+        ti_coatt = self.layer2(it_coatt, it_coatt, text_image_m, 1) #N Lt H
+        return ti_coatt
+
+class BertSSEncoder(nn.Module):
+    def __init__(self, bert_dim, layer_num=3):
+        super(BertSSEncoder, self).__init__()
+        layer = BertSSBlock(bert_dim)     
+        self.layer = nn.ModuleList([copy.deepcopy(layer) for _ in range(layer_num)])
+
+    def forward(self, text_image, text_i, text_image_m):
+        for layer_module in self.layer:
+            text_image = layer_module(text_image, text_image_m)
+        return text_image

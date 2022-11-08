@@ -115,7 +115,7 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
             it_loss, tt_loss, ii_loss, ff_loss, sff_loss, norm_loss = other_loss
 
             loss = 0.5 * norm_loss + (classify_loss + cl_loss * opt.cl_loss_alpha + cl_self_loss * opt.cl_self_loss_alpha\
-                + it_loss + tt_loss + ii_loss + ff_loss + sff_loss) / opt.acc_batch_size 
+                + it_loss + tt_loss + ii_loss + ff_loss + 0.05 * sff_loss) / opt.acc_batch_size 
             loss.backward()
             if not opt.cuda or dist.get_rank() == 0 :
                 train_loader_tqdm.set_description("Train Iteration, loss: %.6f, lr: %e" %

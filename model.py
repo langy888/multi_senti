@@ -166,12 +166,20 @@ class FuseModel(nn.Module):
         self.zoom_value = math.sqrt(opt.tran_dim)
         self.save_image_index = 0
         self.sff_type = opt.sff_type
+        self.ff_d = opt.ff_decompose
+        self.it_d = opt.it_decompose
 
         self.text_model = TextModel(opt)
         self.image_model = ImageModel(opt)
 
-        self.text_image_encoder = BertCSEncoder(opt.tran_dim, opt.concat_att, opt.cross_coatt, opt.self_coatt, 3)
-        
+        if opt.fusion_model == "cs":
+            self.text_image_encoder = BertCSEncoder(opt.tran_dim, opt.concat_att, opt.cross_coatt, opt.self_coatt, 3)
+            self.selfatt = 0
+        elif opt.fusion_model == "ss":
+            self.text_image_encoder  = BertCrossEncoder(opt.tran_dim, 5)
+            #self.text_image_encoder = BertSSEncoder(opt.tran_dim, 3)
+            self.selfatt = 1
+
         #self.ti_cross = BertCrossEncoder(opt.tran_dim, 3)
         #self.it_cross = BertCrossEncoder(opt.tran_dim, 3)
         #self.text_image_encoder = BertCrossEncoder(opt.tran_dim, 3)
@@ -185,58 +193,42 @@ class FuseModel(nn.Module):
             ActivateFun(opt)
         )
 
+        self.image_change = nn.Sequential(
+            nn.Linear(self.image_model.get_output_dim(), opt.tran_dim),
+            ActivateFun(opt)
+        )
+
+        self.image_cls_change = nn.Sequential(
+            nn.Linear(self.image_model.get_output_dim(), opt.tran_dim),
+            ActivateFun(opt)
+        )
         self.text_cls_change = nn.Sequential(
             nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
             ActivateFun(opt)
         )
 
-        self.image_change = nn.Sequential(
-            nn.Linear(self.image_model.get_output_dim(), opt.tran_dim),
-            ActivateFun(opt)
-        )
-        self.image_cls_change = nn.Sequential(
-            nn.Linear(self.image_model.get_output_dim(), opt.tran_dim),
-            ActivateFun(opt)
-        )
+        if self.it_d:
+            self.text_diff = nn.Linear(opt.tran_dim, opt.tran_dim, bias=False)
+            self.image_diff = nn.Linear(opt.tran_dim, opt.tran_dim, bias=False)
+            self.text_image_share = nn.Linear(opt.tran_dim, opt.tran_dim, bias=False)
 
-        # self.ftext_cls_change = nn.Sequential(
-        #     nn.Linear(opt.tran_dim, opt.tran_dim),
-        #     ActivateFun(opt)
-        # )
-        # self.fimage_cls_change = nn.Sequential(
-        #     nn.Linear(opt.tran_dim, opt.tran_dim),
-        #     ActivateFun(opt)
-        # )
+        if not self.ff_d:
 
-        # self.ftext_cls_change1 = nn.Sequential(
-        #     nn.Linear(opt.tran_dim, opt.tran_dim),
-        #     ActivateFun(opt)
-        # )
-        # self.fimage_cls_change1 = nn.Sequential(
-        #     nn.Linear(opt.tran_dim, opt.tran_dim),
-        #     ActivateFun(opt)
-        # )
+            self.ftext_cls_change = nn.Sequential(
+                nn.Linear(opt.tran_dim, opt.tran_dim),
+                ActivateFun(opt)
+            )
+            self.fimage_cls_change = nn.Sequential(
+                nn.Linear(opt.tran_dim, opt.tran_dim),
+                ActivateFun(opt)
+            )
 
-        self.ftext_cls_change = nn.Linear(opt.tran_dim, opt.tran_dim, bias=False)
-        self.fimage_cls_change = nn.Linear(opt.tran_dim, opt.tran_dim, bias=False)
-        self.ftext_cls_change1 = nn.Linear(opt.tran_dim, opt.tran_dim, bias=False)
+        else:
+                
+            self.ftext_cls_change = nn.Linear(opt.tran_dim, opt.tran_dim, bias=False)
+            self.fimage_cls_change = nn.Linear(opt.tran_dim, opt.tran_dim, bias=False)
+            self.ftext_image_share = nn.Linear(opt.tran_dim, opt.tran_dim, bias=False)
 
-        self.dchange = nn.Sequential(
-            nn.Linear(opt.tran_dim, opt.tran_dim),
-            ActivateFun(opt)
-        )
-        self.schange = nn.Sequential(
-            nn.Linear(opt.tran_dim, opt.tran_dim),
-            ActivateFun(opt)
-        )
-
-        self.transformer_embedding_layernorm = nn.Sequential(
-            nn.LayerNorm(opt.tran_dim),
-            nn.Dropout(opt.l_dropout)
-        )
-
-        transformer_encoder_layer = nn.TransformerEncoderLayer(d_model=opt.tran_dim, nhead=opt.tran_dim//64, dim_feedforward=opt.tran_dim * 4)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer=transformer_encoder_layer, num_layers=opt.tran_num_layers)
 
         if self.sff_type == 'cat':
             self.output_attention = nn.Sequential(
@@ -251,12 +243,6 @@ class FuseModel(nn.Module):
                 nn.Linear(opt.tran_dim // 2, 1)
             )            
 
-        self.output_classify = nn.Sequential(
-            nn.Dropout(opt.l_dropout),
-            nn.Linear(opt.tran_dim, opt.tran_dim // 2),
-            ActivateFun(opt),
-            nn.Linear(opt.tran_dim // 2, 3)
-        )
 
     def forward(self, text_inputs, bert_attention_mask, image_inputs, text_image_mask, emoji, hashtag):
         #text_inputs = torch.cat((text_inputs, hashtag, emoji), dim=1)
@@ -290,32 +276,53 @@ class FuseModel(nn.Module):
         text_mask =  text_image_mask[:, :-image_init.size(1)]
         text_extended_attention_mask: torch.Tensor = get_extended_attention_mask(text_mask, text_inputs.size())
 
-        #text_image_cat = torch.cat((text_init, image_init), dim=1)
-
-        text_f, img_f = self.text_image_encoder(text_init, image_init, text_extended_attention_mask, image_extended_attention_mask,  extended_attention_mask)
-
+        ###### selfatt
+        if self.selfatt:
+            text_image_cat = torch.cat((text_init, image_init), dim=1)
+            text_image_output = self.text_image_encoder(text_image_cat, text_image_cat, extended_attention_mask)
+            fused_text_cls = text_image_output[:,0,:]
+            fused_img_cls = text_image_output[:,-50,:]
+        else:
+            text_f, img_f = self.text_image_encoder(text_init, image_init, text_extended_attention_mask, image_extended_attention_mask,  extended_attention_mask)
+            fused_text_cls = text_f[:,0,:]
+            fused_img_cls = img_f[:,0,:]
+            text_image_output = torch.cat((text_f, img_f), dim=1)
         # text_f = self.ti_cross(text_init, image_init, image_extended_attention_mask, self.cross_coatt)
         # img_f = self.it_cross(image_init, text_init, text_extended_attention_mask, self.cross_coatt)
         # text_image_output = torch.cat((text_f, img_f), dim=1)
-        # self.text_image_encoder(text_image_output, text_image_output, extended_attention_mask, self.self_coatt)
-    
-        fused_text_cls = text_f[:,0,:]
-        fused_img_cls = img_f[:,0,:]
+        # self.text_image_encoder(text_image_output, text_image_output, extended_attention_mask, self.self_coatt)    
 
-        fused_text_cls = self.ftext_cls_change(fused_text_cls)
-        fused_img_cls = self.fimage_cls_change(fused_img_cls)
+        fused_text_cls1 = self.ftext_cls_change(fused_text_cls)
+        fused_img_cls1 = self.fimage_cls_change(fused_img_cls)
 
-        sfused_text_cls = self.ftext_cls_change1(fused_text_cls)
-        sfused_img_cls = self.ftext_cls_change1(fused_img_cls)
- 
-        text_image_output = torch.cat((fused_text_cls, fused_img_cls), dim=1)
-        # text_image_output = torch.cat((text_f, img_f), dim=1)
-        # text_image_alpha = self.output_attention(text_image_output)
-        # text_image_alpha = text_image_alpha.squeeze(-1).masked_fill(text_image_mask == 0, -1e9)
-        # text_image_alpha = torch.softmax(text_image_alpha, dim=-1)
-        # text_image_output = (text_image_alpha.unsqueeze(-1) * text_image_output).sum(dim=1)
+        sfused_text_cls = 0
+        sfused_img_cls = 0
+        if self.ff_d:
+            sfused_text_cls = self.ftext_image_share(fused_text_cls)
+            sfused_img_cls = self.ftext_image_share(fused_img_cls)
 
-        norm_loss = torch.norm(torch.mm(self.ftext_cls_change1.weight.T, self.ftext_cls_change.weight)) + torch.norm(torch.mm(self.ftext_cls_change1.weight.T, self.fimage_cls_change.weight))
+
+        stext_cls = 0
+        simg_cls = 0
+        stext_clsd = 0
+        simg_clsd = 0
+        if self.it_d:
+            stext_clsd = self.text_diff(text_cls_init)
+            simg_clsd = self.image_diff(image_cls_init)
+            stext_cls = self.text_image_share(text_cls_init)
+            simg_cls = self.text_image_share(image_cls_init)
+
+
+        text_image_alpha = self.output_attention(text_image_output)
+        text_image_alpha = text_image_alpha.squeeze(-1).masked_fill(text_image_mask == 0, -1e9)
+        text_image_alpha = torch.softmax(text_image_alpha, dim=-1)
+        text_image_output = (text_image_alpha.unsqueeze(-1) * text_image_output).sum(dim=1)
+
+        norm_loss = 0
+        if self.ff_d:
+            norm_loss += torch.norm(torch.mm(self.ftext_image_share.weight.T, self.ftext_cls_change.weight)) + torch.norm(torch.mm(self.ftext_image_share.weight.T, self.fimage_cls_change.weight))
+        if self.it_d:
+            norm_loss += torch.norm(torch.mm(self.text_image_share.weight.T, self.text_diff.weight)) + torch.norm(torch.mm(self.text_image_share.weight.T, self.image_diff.weight))
 
     
         # if self.sff_type == "add":
@@ -332,7 +339,7 @@ class FuseModel(nn.Module):
         # text_image_alpha = torch.softmax(text_image_alpha, dim=-1)
         # fused_output = (text_image_alpha.unsqueeze(-1) * fused_output).sum(dim=1)
 
-        return text_image_output, text_cls_init, image_cls_init, fused_text_cls, fused_img_cls, sfused_text_cls, sfused_img_cls, norm_loss
+        return text_image_output, text_cls_init, image_cls_init, fused_text_cls1, fused_img_cls1, sfused_text_cls, sfused_img_cls, norm_loss, stext_clsd, simg_clsd, stext_cls, simg_cls
 
 
 class CLModel(nn.Module):
@@ -348,6 +355,8 @@ class CLModel(nn.Module):
         self.ii_cla = opt.ii
         self.ff_cl = opt.ff
         self.sff_cl = opt.sff
+        self.ff_d = opt.ff_decompose
+        self.it_d = opt.it_decompose
         #self.mmt
         self.critertion = nn.CrossEntropyLoss()
 
@@ -388,7 +397,7 @@ class CLModel(nn.Module):
 
 
     def forward(self, data_orgin: ModelParam, data_augment: ModelParam = None, labels=None, target_labels=None):
-        orgin_res, orgin_text_cls, orgin_image_cls, ftext, fimage, sftext, sfimage, norm_loss = self.fuse_model(data_orgin.texts, data_orgin.bert_attention_mask,
+        orgin_res, orgin_text_cls, orgin_image_cls, ftext, fimage, sftext, sfimage, norm_loss, ted, imd, tes, ims = self.fuse_model(data_orgin.texts, data_orgin.bert_attention_mask,
                                                                      data_orgin.images, data_orgin.text_image_mask,
                                                                      data_orgin.emoji, data_orgin.hashtag)
         output = self.output_classify(orgin_res)
@@ -410,7 +419,7 @@ class CLModel(nn.Module):
                 l_pos_neg /= self.temperature
                 cla_loss = self.critertion(l_pos_neg, cl_lables)
 
-            cl_self_loss = 0
+            cll_loss = 0
             if self.cll:     
                 #l_pos_neg_self = torch.einsum('nc,ck->nk', [orgin_res_change, orgin_res_change.T])
                 l_pos_neg_self = torch.mm(orgin_res_change, orgin_res_change.T)
@@ -423,17 +432,25 @@ class CLModel(nn.Module):
 
                 l_pos_neg_self = l_pos_neg_self / self.temperature
                 cl_self_loss = torch.gather(l_pos_neg_self, dim=0, index=cl_self_labels)
-                cl_self_loss = - cl_self_loss.sum() / cl_self_labels.size(0)
+                cll_loss = - cl_self_loss.sum() / cl_self_labels.size(0)
 
             it_loss = 0
             if self.it_cl:
-                #it_pos_neg = torch.einsum('nc,ck->nk', [orgin_text_cls, orgin_image_cls.T])
-                it_pos_neg = torch.mm(orgin_text_cls, orgin_image_cls.T)
-                it_cl_lables = torch.arange(it_pos_neg.size(0))
-                if self.set_cuda:
-                    it_cl_lables = it_cl_lables.cuda()
-                it_pos_neg /= self.temperature    
-                it_loss = self.critertion(it_pos_neg, it_cl_lables)           
+                if self.it_d:
+                    it_pos_neg = torch.mm(tes, ims.T)
+                    it_cl_lables = torch.arange(it_pos_neg.size(0))
+                    if self.set_cuda:
+                        it_cl_lables = it_cl_lables.cuda()
+                    it_pos_neg /= self.temperature    
+                    it_loss = self.critertion(it_pos_neg, it_cl_lables)     
+                else:
+                    #it_pos_neg = torch.einsum('nc,ck->nk', [orgin_text_cls, orgin_image_cls.T])
+                    it_pos_neg = torch.mm(orgin_text_cls, orgin_image_cls.T)
+                    it_cl_lables = torch.arange(it_pos_neg.size(0))
+                    if self.set_cuda:
+                        it_cl_lables = it_cl_lables.cuda()
+                    it_pos_neg /= self.temperature    
+                    it_loss = self.critertion(it_pos_neg, it_cl_lables)           
 
             tt_loss = 0           
             if self.tt_cla:
@@ -457,7 +474,10 @@ class CLModel(nn.Module):
 
             ff_loss = 0
             if self.ff_cl:
-                fit_pos_neg = torch.mm(sftext, sfimage.T) #orgin_text_cls, orgin_image_cls
+                if self.ff_d:
+                    fit_pos_neg = torch.mm(sftext, sfimage.T) #orgin_text_cls, orgin_image_cls
+                else:
+                    fit_pos_neg = torch.mm(ftext, fimage.T) #orgin_text_cls, orgin_image_cls
                 fit_cl_lables = torch.arange(fit_pos_neg.size(0))
                 if self.set_cuda:
                     fit_cl_lables = fit_cl_lables.cuda()
@@ -466,17 +486,52 @@ class CLModel(nn.Module):
 
             sff_loss = 0
             if self.sff_cl:
-                fit_pos_neg = torch.mm(sftext, sfimage.T) #orgin_text_cls, orgin_image_cls
-                fit_cl_lables = torch.arange(fit_pos_neg.size(0))
+                # fit_pos_neg = torch.mm(ftext, ftext.T) #orgin_text_cls, orgin_image_cls
+                # fit_pos_neg1 = torch.mm(fimage, fimage.T)
+                # fit_cl_lables = torch.arange(fit_pos_neg.size(0))
 
-                masks_weight = (labels != 1).float()
-                if self.set_cuda:
-                    fit_cl_lables = fit_cl_lables.cuda()
-                    masks_weight = masks_weight.cuda()
-                fit_pos_neg /= self.temperature   
-                sff_cri = torch.nn.CrossEntropyLoss(weight=masks_weight,size_average=True)
-                ff_loss = sff_cri(fit_pos_neg, fit_cl_lables)
+                # masks_weight = (labels != 1).float()
+                # if self.set_cuda:
+                #     fit_cl_lables = fit_cl_lables.cuda()
+                #     masks_weight = masks_weight.cuda()
+                # fit_pos_neg /= self.temperature   
+                # sff_cri = torch.nn.CrossEntropyLoss(weight=masks_weight,size_average=True)
+                # ff_loss = sff_cri(fit_pos_neg, fit_cl_lables)
+                if self.ff_d:
+                    l_pos_neg_self = torch.mm(ftext, ftext.T)
+                    l_pos_neg_self = torch.log_softmax(l_pos_neg_self, dim=-1)
+                    l_pos_neg_self = l_pos_neg_self.view(-1)
+                    l_pos_neg_self1 = torch.mm(fimage, fimage.T)
+                    l_pos_neg_self1 = torch.log_softmax(l_pos_neg_self1, dim=-1)
+                    l_pos_neg_self1 = l_pos_neg_self1.view(-1)
 
+                    cl_self_labels = target_labels[labels[0]]
+                    for index in range(1, orgin_res.size(0)):
+                        cl_self_labels = torch.cat((cl_self_labels, target_labels[labels[index]] + index*labels.size(0)), 0)
+
+                    l_pos_neg_self = l_pos_neg_self / self.temperature
+                    l_pos_neg_self1 = l_pos_neg_self1 / self.temperature
+                    cl_self_loss = torch.gather(l_pos_neg_self, dim=0, index=cl_self_labels)
+                    cl_self_loss1 = torch.gather(l_pos_neg_self1, dim=0, index=cl_self_labels)
+                    sff_loss += - (cl_self_loss.sum() + cl_self_loss1.sum()) / cl_self_labels.size(0)
+
+                if self.it_d:
+                    l_pos_neg_self = torch.mm(ted, ted.T)
+                    l_pos_neg_self = torch.log_softmax(l_pos_neg_self, dim=-1)
+                    l_pos_neg_self = l_pos_neg_self.view(-1)
+                    l_pos_neg_self1 = torch.mm(imd, imd.T)
+                    l_pos_neg_self1 = torch.log_softmax(l_pos_neg_self1, dim=-1)
+                    l_pos_neg_self1 = l_pos_neg_self1.view(-1)
+
+                    cl_self_labels = target_labels[labels[0]]
+                    for index in range(1, orgin_res.size(0)):
+                        cl_self_labels = torch.cat((cl_self_labels, target_labels[labels[index]] + index*labels.size(0)), 0)
+
+                    l_pos_neg_self = l_pos_neg_self / self.temperature
+                    l_pos_neg_self1 = l_pos_neg_self1 / self.temperature
+                    cl_self_loss = torch.gather(l_pos_neg_self, dim=0, index=cl_self_labels)
+                    cl_self_loss1 = torch.gather(l_pos_neg_self1, dim=0, index=cl_self_labels)
+                    sff_loss += - (cl_self_loss.sum() + cl_self_loss1.sum()) / cl_self_labels.size(0)
             # if self.fo_cl:
             #     tt_pos_neg = torch.mm(ftext, orgin_image_cls.T)
             #     tt_cl_lables = torch.arange(tt_pos_neg.size(0))
@@ -493,7 +548,7 @@ class CLModel(nn.Module):
             #     ii_loss = self.critertion(ii_pos_neg, ii_cl_lables) 
 
 
-            return output, cl_self_loss, cla_loss, (it_loss, tt_loss, ii_loss, ff_loss, sff_loss, norm_loss)
+            return output, cll_loss, cla_loss, (it_loss, tt_loss, ii_loss, ff_loss, sff_loss, norm_loss)
         else:
             return output
 

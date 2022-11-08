@@ -36,7 +36,11 @@ tt=0
 ii=0
 ff=1
 sff=0
-sff_type=cat
+sff_type=avg
+
+it_decompose=1
+ff_decompose=0
+fusion_model=cs
 
 concat_att=1
 cross_coatt=0
@@ -52,6 +56,7 @@ python -m torch.distributed.launch --nproc_per_node=$1 --nnodes=1 main_dist.py -
         -data_path_name 10-flod-1 -optim ${optim} -warmup_step_epoch ${warmup_step_epoch} -lr ${lr} -fuse_lr ${fuse_lr} \
         -tran_num_layers ${tran_num_layers} -image_num_layers ${image_num_layers} -train_fuse_model_epoch ${train_fuse_model_epoch} \
         -no_extra_img_trans ${no_extra_img_trans} -gcn ${gcn} -cll ${cll} -cla ${cla} -it ${it} -tt ${tt} -ii ${ii} -ff ${ff} \
-        -concat_att ${concat_att} -cross_coatt ${cross_coatt} -self_coatt ${self_coatt} -sff ${sff} -tran_dim ${tran_dim} -sff_type ${sff_type}
+        -concat_att ${concat_att} -cross_coatt ${cross_coatt} -self_coatt ${self_coatt} -sff ${sff} -tran_dim ${tran_dim} -sff_type ${sff_type} \
+        -ff_decompose ${ff_decompose} -it_decompose ${it_decompose} -fusion_model ${fusion_model}
  
  

@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: fuyubo-bertcs-sp-cls-ff
+  name: fuyubo-bertcs-sp-it-dcl-nosff
 spec:
   restartPolicy: Never
   hostIPC: false
