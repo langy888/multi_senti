@@ -271,6 +271,7 @@ class FuseModel(nn.Module):
         image_extended_attention_mask = get_extended_attention_mask(image_mask, image_init.size())
 
         image_init = self.image_encoder(image_init, image_init, image_extended_attention_mask)
+        image_cls_init = image_init[:,0,:]
 
         ####非crossatt删掉
         text_mask =  text_image_mask[:, :-image_init.size(1)]
@@ -515,23 +516,23 @@ class CLModel(nn.Module):
                     cl_self_loss1 = torch.gather(l_pos_neg_self1, dim=0, index=cl_self_labels)
                     sff_loss += - (cl_self_loss.sum() + cl_self_loss1.sum()) / cl_self_labels.size(0)
 
-                if self.it_d:
-                    l_pos_neg_self = torch.mm(ted, ted.T)
-                    l_pos_neg_self = torch.log_softmax(l_pos_neg_self, dim=-1)
-                    l_pos_neg_self = l_pos_neg_self.view(-1)
-                    l_pos_neg_self1 = torch.mm(imd, imd.T)
-                    l_pos_neg_self1 = torch.log_softmax(l_pos_neg_self1, dim=-1)
-                    l_pos_neg_self1 = l_pos_neg_self1.view(-1)
+                # if self.it_d:
+                #     l_pos_neg_self = torch.mm(ted, ted.T)
+                #     l_pos_neg_self = torch.log_softmax(l_pos_neg_self, dim=-1)
+                #     l_pos_neg_self = l_pos_neg_self.view(-1)
+                #     l_pos_neg_self1 = torch.mm(imd, imd.T)
+                #     l_pos_neg_self1 = torch.log_softmax(l_pos_neg_self1, dim=-1)
+                #     l_pos_neg_self1 = l_pos_neg_self1.view(-1)
 
-                    cl_self_labels = target_labels[labels[0]]
-                    for index in range(1, orgin_res.size(0)):
-                        cl_self_labels = torch.cat((cl_self_labels, target_labels[labels[index]] + index*labels.size(0)), 0)
+                #     cl_self_labels = target_labels[labels[0]]
+                #     for index in range(1, orgin_res.size(0)):
+                #         cl_self_labels = torch.cat((cl_self_labels, target_labels[labels[index]] + index*labels.size(0)), 0)
 
-                    l_pos_neg_self = l_pos_neg_self / self.temperature
-                    l_pos_neg_self1 = l_pos_neg_self1 / self.temperature
-                    cl_self_loss = torch.gather(l_pos_neg_self, dim=0, index=cl_self_labels)
-                    cl_self_loss1 = torch.gather(l_pos_neg_self1, dim=0, index=cl_self_labels)
-                    sff_loss += - (cl_self_loss.sum() + cl_self_loss1.sum()) / cl_self_labels.size(0)
+                #     l_pos_neg_self = l_pos_neg_self / self.temperature
+                #     l_pos_neg_self1 = l_pos_neg_self1 / self.temperature
+                #     cl_self_loss = torch.gather(l_pos_neg_self, dim=0, index=cl_self_labels)
+                #     cl_self_loss1 = torch.gather(l_pos_neg_self1, dim=0, index=cl_self_labels)
+                #     sff_loss += - (cl_self_loss.sum() + cl_self_loss1.sum()) / cl_self_labels.size(0)
             # if self.fo_cl:
             #     tt_pos_neg = torch.mm(ftext, orgin_image_cls.T)
             #     tt_cl_lables = torch.arange(tt_pos_neg.size(0))
