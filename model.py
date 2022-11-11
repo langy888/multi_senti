@@ -437,21 +437,41 @@ class CLModel(nn.Module):
 
             it_loss = 0
             if self.it_cl:
-                if self.it_d:
-                    it_pos_neg = torch.mm(tes, ims.T)
-                    it_cl_lables = torch.arange(it_pos_neg.size(0))
-                    if self.set_cuda:
-                        it_cl_lables = it_cl_lables.cuda()
-                    it_pos_neg /= self.temperature    
-                    it_loss = self.critertion(it_pos_neg, it_cl_lables)     
-                else:
-                    #it_pos_neg = torch.einsum('nc,ck->nk', [orgin_text_cls, orgin_image_cls.T])
-                    it_pos_neg = torch.mm(orgin_text_cls, orgin_image_cls.T)
-                    it_cl_lables = torch.arange(it_pos_neg.size(0))
-                    if self.set_cuda:
-                        it_cl_lables = it_cl_lables.cuda()
-                    it_pos_neg /= self.temperature    
-                    it_loss = self.critertion(it_pos_neg, it_cl_lables)           
+                zeros = target_labels[0]
+                ones = target_labels[1]
+
+                share_labels = torch.arange(ones.size(0))
+                all_lables = torch.arange(zeros.size(0))
+                if self.set_cuda:
+                    share_labels = share_labels.cuda()
+                    all_lables = all_lables.cuda()
+
+                share_it_pos_neg = torch.mm(tes[ones], ims[ones].T)
+                all_it_pos_neg = torch.mm(orgin_text_cls[zeros], orgin_image_cls[zeros].T)
+
+                share_it_pos_neg /= self.temperature    
+                share_it_pos_neg = self.critertion(share_it_pos_neg, share_labels)  
+
+                all_it_pos_neg /= self.temperature    
+                all_it_pos_neg = self.critertion(all_it_pos_neg, all_lables)  
+
+                it_loss = all_it_pos_neg + share_it_pos_neg
+
+                # if self.it_d:
+                #     it_pos_neg = torch.mm(tes, ims.T)
+                #     it_cl_lables = torch.arange(it_pos_neg.size(0))
+                #     if self.set_cuda:
+                #         it_cl_lables = it_cl_lables.cuda()
+                #     it_pos_neg /= self.temperature    
+                #     it_loss = self.critertion(it_pos_neg, it_cl_lables)     
+                # else:
+                #     #it_pos_neg = torch.einsum('nc,ck->nk', [orgin_text_cls, orgin_image_cls.T])
+                #     it_pos_neg = torch.mm(orgin_text_cls, orgin_image_cls.T)
+                #     it_cl_lables = torch.arange(it_pos_neg.size(0))
+                #     if self.set_cuda:
+                #         it_cl_lables = it_cl_lables.cuda()
+                #     it_pos_neg /= self.temperature    
+                #     it_loss = self.critertion(it_pos_neg, it_cl_lables)           
 
             tt_loss = 0           
             if self.tt_cla:
@@ -533,6 +553,7 @@ class CLModel(nn.Module):
                 #     cl_self_loss = torch.gather(l_pos_neg_self, dim=0, index=cl_self_labels)
                 #     cl_self_loss1 = torch.gather(l_pos_neg_self1, dim=0, index=cl_self_labels)
                 #     sff_loss += - (cl_self_loss.sum() + cl_self_loss1.sum()) / cl_self_labels.size(0)
+                
             # if self.fo_cl:
             #     tt_pos_neg = torch.mm(ftext, orgin_image_cls.T)
             #     tt_cl_lables = torch.arange(tt_pos_neg.size(0))
