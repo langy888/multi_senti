@@ -39,7 +39,7 @@ sff=1
 sff_type=avg
 
 it_decompose=1
-ff_decompose=0
+ff_decompose=1
 fusion_model=cs
 
 concat_att=1
