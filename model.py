@@ -340,7 +340,7 @@ class FuseModel(nn.Module):
         # text_image_alpha = torch.softmax(text_image_alpha, dim=-1)
         # fused_output = (text_image_alpha.unsqueeze(-1) * fused_output).sum(dim=1)
 
-        return text_image_output, text_cls_init, image_cls_init, fused_text_cls1, fused_img_cls1, sfused_text_cls, sfused_img_cls, norm_loss, stext_clsd, simg_clsd, stext_cls, simg_cls
+        return text_image_output, text_cls_init, image_cls_init, fused_text_cls, fused_img_cls, sfused_text_cls, sfused_img_cls, norm_loss, stext_clsd, simg_clsd, stext_cls, simg_cls
 
 
 class CLModel(nn.Module):
@@ -495,15 +495,36 @@ class CLModel(nn.Module):
 
             ff_loss = 0
             if self.ff_cl:
-                if self.ff_d:
-                    fit_pos_neg = torch.mm(sftext, sfimage.T) #orgin_text_cls, orgin_image_cls
-                else:
-                    fit_pos_neg = torch.mm(ftext, fimage.T) #orgin_text_cls, orgin_image_cls
-                fit_cl_lables = torch.arange(fit_pos_neg.size(0))
+                zeros = target_labels[0]
+                ones = target_labels[1]
+
+                share_labels = torch.arange(ones.size(0))
+                all_lables = torch.arange(zeros.size(0))
                 if self.set_cuda:
-                    fit_cl_lables = fit_cl_lables.cuda()
-                fit_pos_neg /= self.temperature   
-                ff_loss = self.critertion(fit_pos_neg, fit_cl_lables)
+                    share_labels = share_labels.cuda()
+                    all_lables = all_lables.cuda()
+
+                share_it_pos_neg = torch.mm(sftext[ones], sfimage[ones].T)
+                all_it_pos_neg = torch.mm(ftext[zeros], fimage[zeros].T)
+
+                share_it_pos_neg /= self.temperature    
+                share_it_pos_neg = self.critertion(share_it_pos_neg, share_labels)  
+
+                all_it_pos_neg /= self.temperature    
+                all_it_pos_neg = self.critertion(all_it_pos_neg, all_lables)  
+
+                ff_loss = all_it_pos_neg + share_it_pos_neg
+
+
+                # if self.ff_d:
+                #     fit_pos_neg = torch.mm(sftext, sfimage.T) #orgin_text_cls, orgin_image_cls
+                # else:
+                #     fit_pos_neg = torch.mm(ftext, fimage.T) #orgin_text_cls, orgin_image_cls
+                # fit_cl_lables = torch.arange(fit_pos_neg.size(0))
+                # if self.set_cuda:
+                #     fit_cl_lables = fit_cl_lables.cuda()
+                # fit_pos_neg /= self.temperature   
+                # ff_loss = self.critertion(fit_pos_neg, fit_cl_lables)
 
             sff_loss = 0
             if self.sff_cl:

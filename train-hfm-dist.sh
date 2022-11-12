@@ -35,11 +35,11 @@ it=1
 tt=0
 ii=0
 ff=1
-sff=1
+sff=0
 sff_type=avg
 
 it_decompose=1
-ff_decompose=0
+ff_decompose=1
 fusion_model=cs
 
 concat_att=1
