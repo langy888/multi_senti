@@ -34,8 +34,8 @@ cla=0
 it=1
 tt=0
 ii=0
-ff=1
-sff=1
+ff=0
+sff=0
 sff_type=avg
 
 it_decompose=1
