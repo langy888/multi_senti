@@ -6,8 +6,8 @@ fuse_lr=2e-5
 image_output_type=all
 optim=adamw
 data_type=HFM
-train_fuse_model_epoch=20
-epoch=30
+train_fuse_model_epoch=0
+epoch=50
 warmup_step_epoch=2
 fuse_type=att
 batch=128
@@ -20,7 +20,7 @@ fixed_image_model=0
 no_extra_img_trans=0
 gcn=0
 
-text_model=bert-base 
+text_model=roberta_base 
 image_model=resnet-50
 #bert-base
 #roberta_base 
@@ -34,12 +34,12 @@ cla=0
 it=1
 tt=0
 ii=0
-ff=0
+ff=1
 sff=0
 sff_type=avg
 
 it_decompose=1
-ff_decompose=1
+ff_decompose=0
 fusion_model=cs
 
 concat_att=1

@@ -30,8 +30,7 @@ def test_process(opt, critertion, cl_model, test_loader, last_F1=None, log_summa
         epoch_step_num = epoch * test_loader_tqdm.total
         step_num = 0
         for index, data in enumerate(test_loader_tqdm):
-            texts_origin, bert_attention_mask, image_origin, text_image_mask, labels, \
-            texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, _, emoji_ids, hashtag_ids, img_ids  = data
+            texts_origin, bert_attention_mask, image_origin, text_image_mask, labels, _, img_ids  = data
             # continue
 
             if opt.cuda is True:
@@ -40,10 +39,9 @@ def test_process(opt, critertion, cl_model, test_loader, last_F1=None, log_summa
                 image_origin = image_origin.cuda()
                 text_image_mask = text_image_mask.cuda()
                 labels = labels.cuda()
-                emoji_ids = emoji_ids.cuda()
-                hashtag_ids = hashtag_ids.cuda()
+
             orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin,
-                                       text_image_mask=text_image_mask, emoji=emoji_ids, hashtag=hashtag_ids)
+                                       text_image_mask=text_image_mask)
             origin_res = cl_model(orgin_param)
 
             loss = critertion(origin_res, labels) / opt.acc_batch_size

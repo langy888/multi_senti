@@ -184,14 +184,7 @@ if __name__ == '__main__':
         photo_path = data_path_root + '/dataset_image'
         image_coordinate = None
         data_translation_path = data_path_root + '/HFM_e3.json'
-    else:
-        data_path_root = abl_path + 'dataset/data/' + opt.data_type + '/' + opt.data_path_name + '/'
-        train_data_path = data_path_root + 'train.json'
-        dev_data_path = data_path_root + 'dev.json'
-        test_data_path = data_path_root + 'test.json'
-        photo_path = abl_path + 'dataset/data/' + opt.data_type + '/dataset_image'
-        image_coordinate = None
-        data_translation_path = abl_path + 'dataset/data/' + opt.data_type + '/' + opt.data_type + '_translation.json'
+
 
     # data_type:标识数据的类型，1是训练数据，2是开发集，3是测试数据
     train_loader, opt.train_data_len = data_process.data_process(opt, train_data_path, tokenizer, photo_path, data_type=1, data_translation_path=data_translation_path,

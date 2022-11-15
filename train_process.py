@@ -86,9 +86,7 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
         epoch_step_num = epoch * len(train_loader)
         step_num = 0
         for index, data in enumerate(train_loader_tqdm):
-            texts_origin, bert_attention_mask, image_origin, text_image_mask, labels,\
-                texts_augment, bert_attention_mask_augment, image_augment, text_image_mask_augment, target_labels, \
-                    emoji_ids, hashtag_ids, img_ids = data
+            texts_origin, bert_attention_mask, image_origin, text_image_mask, labels, target_labels, img_ids = data
 
             if opt.cuda is True:
                 texts_origin = texts_origin.cuda()
@@ -96,26 +94,19 @@ def train_process(opt, train_loader, dev_loader, test_loader, cl_model, criterti
                 image_origin = image_origin.cuda()
                 text_image_mask = text_image_mask.cuda()
                 labels = labels.cuda()
-                texts_augment = texts_augment.cuda()
-                bert_attention_mask_augment = bert_attention_mask_augment.cuda()
-                image_augment = image_augment.cuda()
-                text_image_mask_augment = text_image_mask_augment.cuda()
-                emoji_ids = emoji_ids.cuda()
-                hashtag_ids = hashtag_ids.cuda()
                 for i in range(len(target_labels)):
                     target_labels[i] = target_labels[i].cuda()
 
-            orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin, text_image_mask=text_image_mask, emoji=emoji_ids, hashtag=hashtag_ids)
-            augment_param.set_data_param(texts=texts_augment, bert_attention_mask=bert_attention_mask_augment, images=image_augment, text_image_mask=text_image_mask_augment, emoji=emoji_ids, hashtag=hashtag_ids)
-
-            origin_res, cl_self_loss, cl_loss, other_loss = cl_model(orgin_param, augment_param, labels, target_labels)
+            orgin_param.set_data_param(texts=texts_origin, bert_attention_mask=bert_attention_mask, images=image_origin, text_image_mask=text_image_mask)
+           
+            origin_res, cl_self_loss, cl_loss, other_loss = cl_model(orgin_param, 1, labels, target_labels)
 
             classify_loss = critertion(origin_res, labels)
             #cl_loss = critertion(l_pos_neg, cl_lables)
             it_loss, tt_loss, ii_loss, ff_loss, sff_loss, norm_loss = other_loss
 
-            loss = 0.5 * norm_loss + (classify_loss + cl_loss * opt.cl_loss_alpha + cl_self_loss * opt.cl_self_loss_alpha\
-                + it_loss + tt_loss + ii_loss + ff_loss + 0.05 * sff_loss) / opt.acc_batch_size 
+            loss = norm_loss + (classify_loss + cl_loss * opt.cl_loss_alpha + cl_self_loss * opt.cl_self_loss_alpha\
+                + it_loss + tt_loss + ii_loss + ff_loss + sff_loss) / opt.acc_batch_size 
             loss.backward()
             if not opt.cuda or dist.get_rank() == 0 :
                 train_loader_tqdm.set_description("Train Iteration, loss: %.6f, lr: %e" %
