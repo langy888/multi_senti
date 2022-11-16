@@ -20,7 +20,7 @@ fixed_image_model=0
 no_extra_img_trans=0
 gcn=0
 
-text_model=bert-base 
+text_model=bert-base
 image_model=resnet-50
 #bert-base
 #roberta_base 
@@ -30,16 +30,16 @@ image_model=resnet-50
 #simces_roberta_sup
 #simces_roberta_unsup
 cll=1
-cla=0
+cla=1
 it=1
 tt=0
 ii=0
-ff=0
-sff=0
+ff=1
+sff=1
 sff_type=avg
 
 it_decompose=1
-ff_decompose=1
+ff_decompose=0
 fusion_model=cs
 
 concat_att=1

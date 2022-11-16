@@ -4,9 +4,10 @@ Date: 2022/4/11 上午10:25
 Version: 1.0
 """
 
-import torch.nn.modules as nn
+import torch.nn as nn
 import torchvision.models as cv_models
 import torch
+import torch.nn.functional as F
 import os
 from transformers import BertConfig, BertForPreTraining, AutoTokenizer, AutoModel,\
     ViTConfig, ViTModel, ViTFeatureExtractor
@@ -190,21 +191,25 @@ class FuseModel(nn.Module):
 
         self.text_change = nn.Sequential(
             nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
-            ActivateFun(opt)
+            ActivateFun(opt),
+            nn.LayerNorm(opt.tran_dim)
         )
 
         self.image_change = nn.Sequential(
             nn.Linear(self.image_model.get_output_dim(), opt.tran_dim),
-            ActivateFun(opt)
+            ActivateFun(opt),
+            nn.LayerNorm(opt.tran_dim)
         )
 
         self.image_cls_change = nn.Sequential(
             nn.Linear(self.image_model.get_output_dim(), opt.tran_dim),
-            ActivateFun(opt)
+            ActivateFun(opt),
+            nn.LayerNorm(opt.tran_dim)
         )
         self.text_cls_change = nn.Sequential(
             nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
-            ActivateFun(opt)
+            ActivateFun(opt),
+            nn.LayerNorm(opt.tran_dim)
         )
 
         if self.it_d:
@@ -360,6 +365,11 @@ class CLModel(nn.Module):
         self.it_d = opt.it_decompose
         #self.mmt
         self.critertion = nn.CrossEntropyLoss()
+        self.diffloss = DiffLoss()
+        self.reconloss = MSE()
+        self.recont = nn.Linear(opt.tran_dim, opt.tran_dim)
+        self.reconi = nn.Linear(opt.tran_dim, opt.tran_dim)
+
 
         if opt.sff_type == "cat":
 
@@ -498,29 +508,11 @@ class CLModel(nn.Module):
                 # fit_pos_neg /= self.temperature   
                 # sff_cri = torch.nn.CrossEntropyLoss(weight=masks_weight,size_average=True)
                 # ff_loss = sff_cri(fit_pos_neg, fit_cl_lables)
-                if self.ff_d:
-                    l_pos_neg_self = torch.mm(ftext, ftext.T)
-                    l_pos_neg_self = torch.log_softmax(l_pos_neg_self, dim=-1)
-                    l_pos_neg_self = l_pos_neg_self.view(-1)
-                    l_pos_neg_self1 = torch.mm(fimage, fimage.T)
-                    l_pos_neg_self1 = torch.log_softmax(l_pos_neg_self1, dim=-1)
-                    l_pos_neg_self1 = l_pos_neg_self1.view(-1)
-
-                    cl_self_labels = target_labels[labels[0]]
-                    for index in range(1, orgin_res.size(0)):
-                        cl_self_labels = torch.cat((cl_self_labels, target_labels[labels[index]] + index*labels.size(0)), 0)
-
-                    l_pos_neg_self = l_pos_neg_self / self.temperature
-                    l_pos_neg_self1 = l_pos_neg_self1 / self.temperature
-                    cl_self_loss = torch.gather(l_pos_neg_self, dim=0, index=cl_self_labels)
-                    cl_self_loss1 = torch.gather(l_pos_neg_self1, dim=0, index=cl_self_labels)
-                    sff_loss += - (cl_self_loss.sum() + cl_self_loss1.sum()) / cl_self_labels.size(0)
-
-                # if self.it_d:
-                #     l_pos_neg_self = torch.mm(ted, ted.T)
+                # if self.ff_d:
+                #     l_pos_neg_self = torch.mm(ftext, ftext.T)
                 #     l_pos_neg_self = torch.log_softmax(l_pos_neg_self, dim=-1)
                 #     l_pos_neg_self = l_pos_neg_self.view(-1)
-                #     l_pos_neg_self1 = torch.mm(imd, imd.T)
+                #     l_pos_neg_self1 = torch.mm(fimage, fimage.T)
                 #     l_pos_neg_self1 = torch.log_softmax(l_pos_neg_self1, dim=-1)
                 #     l_pos_neg_self1 = l_pos_neg_self1.view(-1)
 
@@ -533,6 +525,35 @@ class CLModel(nn.Module):
                 #     cl_self_loss = torch.gather(l_pos_neg_self, dim=0, index=cl_self_labels)
                 #     cl_self_loss1 = torch.gather(l_pos_neg_self1, dim=0, index=cl_self_labels)
                 #     sff_loss += - (cl_self_loss.sum() + cl_self_loss1.sum()) / cl_self_labels.size(0)
+
+                if self.it_d:
+                    sff_loss += self.diffloss(ted,tes)
+                    sff_loss += self.diffloss(imd,ims)
+                    sff_loss += self.diffloss(ted,imd)
+                    #self.diffloss
+                    # recon_t = self.recont(ted+tes)
+                    # recon_i = self.reconi(imd+ims)
+
+                    # ii_loss += self.reconloss(recon_t,orgin_text_cls)
+                    # ii_loss += self.reconloss(recon_i,orgin_image_cls)
+                    # ii_loss = ii_loss/2.0
+
+                    # l_pos_neg_self = torch.mm(ted, ted.T)
+                    # l_pos_neg_self = torch.log_softmax(l_pos_neg_self, dim=-1)
+                    # l_pos_neg_self = l_pos_neg_self.view(-1)
+                    # l_pos_neg_self1 = torch.mm(imd, imd.T)
+                    # l_pos_neg_self1 = torch.log_softmax(l_pos_neg_self1, dim=-1)
+                    # l_pos_neg_self1 = l_pos_neg_self1.view(-1)
+
+                    # cl_self_labels = target_labels[labels[0]]
+                    # for index in range(1, orgin_res.size(0)):
+                    #     cl_self_labels = torch.cat((cl_self_labels, target_labels[labels[index]] + index*labels.size(0)), 0)
+
+                    # l_pos_neg_self = l_pos_neg_self / self.temperature
+                    # l_pos_neg_self1 = l_pos_neg_self1 / self.temperature
+                    # cl_self_loss = torch.gather(l_pos_neg_self, dim=0, index=cl_self_labels)
+                    # cl_self_loss1 = torch.gather(l_pos_neg_self1, dim=0, index=cl_self_labels)
+                    # sff_loss += - (cl_self_loss.sum() + cl_self_loss1.sum()) / cl_self_labels.size(0)
             # if self.fo_cl:
             #     tt_pos_neg = torch.mm(ftext, orgin_image_cls.T)
             #     tt_cl_lables = torch.arange(tt_pos_neg.size(0))
@@ -566,3 +587,51 @@ class TensorBoardModel(nn.Module):
         orgin_param.set_data_param(texts=texts, bert_attention_mask=bert_attention_mask, images=images, text_image_mask=text_image_mask)
         augment_param.set_data_param(texts=texts_augment, bert_attention_mask=bert_attention_mask_augment, images=images_augment, text_image_mask=text_image_mask_augment)
         return self.cl_model(orgin_param, augment_param, label, [torch.ones(1, dtype=torch.int64) for _ in range(3)])
+
+class DiffLoss(nn.Module):
+
+    def __init__(self):
+        super(DiffLoss, self).__init__()
+        self.critertion = nn.CrossEntropyLoss()
+
+    def forward(self, input1, input2):
+
+        batch_size = input1.size(0)
+        input1 = input1.view(batch_size, -1)
+        input2 = input2.view(batch_size, -1)
+
+        #Zero mean
+        input1_mean = torch.mean(input1, dim=0, keepdims=True)
+        input2_mean = torch.mean(input2, dim=0, keepdims=True)
+        input1 = input1 - input1_mean
+        input2 = input2 - input2_mean
+
+        input1_l2_norm = torch.norm(input1, p=2, dim=1, keepdim=True).detach()
+        input1_l2 = input1.div(input1_l2_norm.expand_as(input1) + 1e-6)
+        
+        input2_l2_norm = torch.norm(input2, p=2, dim=1, keepdim=True).detach()
+        input2_l2 = input2.div(input2_l2_norm.expand_as(input2) + 1e-6)
+
+        euclidean_distance = F.pairwise_distance(input1_l2, input2_l2, keepdim=True)
+        diff_loss = torch.mean(torch.pow(torch.clamp(2.0 - euclidean_distance, min=0.0), 2))
+
+
+        #aaa = torch.mm(input1_l2, input2_l2.T) 
+        #ii_cl_lables = torch.arange(8)
+        #diff_loss = self.critertion(aaa, ii_cl_lables) 
+
+        #diff_loss = torch.mean((input1_l2.t().mm(input2_l2)).pow(2))
+
+        return diff_loss
+
+class MSE(nn.Module):
+    def __init__(self):
+        super(MSE, self).__init__()
+
+    def forward(self, pred, real):
+
+        diffs = torch.add(real, -pred)
+        n = torch.numel(diffs.data)
+        mse = torch.sum(diffs.pow(2)) / n
+
+        return mse
