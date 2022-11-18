@@ -192,24 +192,20 @@ class FuseModel(nn.Module):
         self.text_change = nn.Sequential(
             nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
             ActivateFun(opt),
-            nn.LayerNorm(opt.tran_dim)
         )
 
         self.image_change = nn.Sequential(
             nn.Linear(self.image_model.get_output_dim(), opt.tran_dim),
             ActivateFun(opt),
-            nn.LayerNorm(opt.tran_dim)
         )
 
         self.image_cls_change = nn.Sequential(
             nn.Linear(self.image_model.get_output_dim(), opt.tran_dim),
             ActivateFun(opt),
-            nn.LayerNorm(opt.tran_dim)
         )
         self.text_cls_change = nn.Sequential(
             nn.Linear(self.text_model.get_output_dim(), opt.tran_dim),
             ActivateFun(opt),
-            nn.LayerNorm(opt.tran_dim)
         )
 
         if self.it_d:
@@ -366,6 +362,7 @@ class CLModel(nn.Module):
         #self.mmt
         self.critertion = nn.CrossEntropyLoss()
         self.diffloss = DiffLoss()
+        self.cllloss = CCLoss()
         self.reconloss = MSE()
         self.recont = nn.Linear(opt.tran_dim, opt.tran_dim)
         self.reconi = nn.Linear(opt.tran_dim, opt.tran_dim)
@@ -400,11 +397,11 @@ class CLModel(nn.Module):
             )
 
 
-        # self.augment_linear_change = nn.Sequential(
-        #     nn.Linear(opt.tran_dim, opt.tran_dim),
-        #     ActivateFun(opt),
-        #     nn.Linear(opt.tran_dim, opt.tran_dim)
-        # )
+        self.augment_linear_change = nn.Sequential(
+            nn.Linear(opt.tran_dim, opt.tran_dim),
+            ActivateFun(opt),
+            nn.Linear(opt.tran_dim, opt.tran_dim)
+        )
 
 
     def forward(self, data_orgin: ModelParam, data_augment: ModelParam = None, labels=None, target_labels=None):
@@ -414,10 +411,10 @@ class CLModel(nn.Module):
         output = self.output_classify(orgin_res)
 
         if data_augment:
-            # augment_res, augment_text_cls, augment_image_cls ,_ ,_ , _ ,_= self.fuse_model(data_augment.texts, data_augment.bert_attention_mask,
-            #                                                                 data_augment.images, data_augment.text_image_mask,
-            #                                                                 data_augment.emoji, data_augment.hashtag)
-            # augment_res_change = self.augment_linear_change(augment_res)
+            augment_res, _, _ ,_ ,_ , _ ,_, _, _, _, _, _= self.fuse_model(data_augment.texts, data_augment.bert_attention_mask,
+                                                                            data_augment.images, data_augment.text_image_mask,
+                                                                            data_augment.emoji, data_augment.hashtag)
+            augment_res_change = self.augment_linear_change(augment_res)
             orgin_res_change = self.orgin_linear_change(orgin_res)
 
             cla_loss = 0
@@ -527,10 +524,20 @@ class CLModel(nn.Module):
                 #     sff_loss += - (cl_self_loss.sum() + cl_self_loss1.sum()) / cl_self_labels.size(0)
 
                 if self.it_d:
-                    sff_loss += self.diffloss(ted,tes)
-                    sff_loss += self.diffloss(imd,ims)
-                    sff_loss += self.diffloss(ted,imd)
-                    #self.diffloss
+
+                    #ii_loss += self.diffloss(ted,tes)
+                    #ii_loss += self.diffloss(imd,ims)
+                    #ii_loss += self.diffloss(ted,imd)
+
+                    l_pos_neg_self = -torch.mm(ted, imd.T)
+                    sff_cl_lables = torch.arange(ted.size(0))
+                    if self.set_cuda:
+                        sff_cl_lables = sff_cl_lables.cuda()
+                    l_pos_neg_self /= self.temperature   
+                    ii_loss = self.critertion(l_pos_neg_self, sff_cl_lables)   
+
+                    #tt_loss += self.cllloss(ted,imd, labels)             
+
                     # recon_t = self.recont(ted+tes)
                     # recon_i = self.reconi(imd+ims)
 
@@ -592,7 +599,6 @@ class DiffLoss(nn.Module):
 
     def __init__(self):
         super(DiffLoss, self).__init__()
-        self.critertion = nn.CrossEntropyLoss()
 
     def forward(self, input1, input2):
 
@@ -613,7 +619,7 @@ class DiffLoss(nn.Module):
         input2_l2 = input2.div(input2_l2_norm.expand_as(input2) + 1e-6)
 
         euclidean_distance = F.pairwise_distance(input1_l2, input2_l2, keepdim=True)
-        diff_loss = torch.mean(torch.pow(torch.clamp(2.0 - euclidean_distance, min=0.0), 2))
+        diff_loss = torch.mean(torch.pow(torch.clamp(2.0 - euclidean_distance, min=0), 2))
 
 
         #aaa = torch.mm(input1_l2, input2_l2.T) 
@@ -623,6 +629,99 @@ class DiffLoss(nn.Module):
         #diff_loss = torch.mean((input1_l2.t().mm(input2_l2)).pow(2))
 
         return diff_loss
+
+
+class CCLoss(nn.Module):
+
+    def __init__(self):
+        super(CCLoss, self).__init__()
+
+    def forward(self, input1, input2, label):
+        #1拉远 0拉近
+        batch_size = input1.size(0)
+        #input1 = input1.view(batch_size, -1)
+        #input2 = input2.view(batch_size, -1)
+
+        #Zero mean
+        input1_mean = torch.mean(input1, dim=0, keepdims=True)
+        input2_mean = torch.mean(input2, dim=0, keepdims=True)
+        input1 = input1 - input1_mean
+        input2 = input2 - input2_mean
+
+        input1_l2_norm = torch.norm(input1, p=2, dim=1, keepdim=True).detach()
+        input1_l2 = input1.div(input1_l2_norm.expand_as(input1) + 1e-6)
+        
+        input2_l2_norm = torch.norm(input2, p=2, dim=1, keepdim=True).detach()
+        input2_l2 = input2.div(input2_l2_norm.expand_as(input2) + 1e-6)
+
+
+        euclidean_distance = F.pairwise_distance(input1_l2, input2_l2, keepdim=True)
+
+
+        diff_loss = torch.mean((1-label)*torch.pow(euclidean_distance, 2) + (label)*torch.pow(torch.clamp(2.0 - euclidean_distance, min=0.0), 2))
+
+
+        #aaa = torch.mm(input1_l2, input2_l2.T) 
+        #ii_cl_lables = torch.arange(8)
+        #diff_loss = self.critertion(aaa, ii_cl_lables) 
+
+        #diff_loss = torch.mean((input1_l2.t().mm(input2_l2)).pow(2))
+
+        return diff_loss
+
+
+class CLLoss(nn.Module):
+
+    def __init__(self):
+        super(CLLoss, self).__init__()
+
+    def forward(self, input1, input2, input3, input4):
+        #1拉远 0拉近
+        batch_size = input1.size(0)
+        #input1 = input1.view(batch_size, -1)
+        #input2 = input2.view(batch_size, -1)
+
+        #Zero mean
+        input1_mean = torch.mean(input1, dim=0, keepdims=True)
+        input2_mean = torch.mean(input2, dim=0, keepdims=True)
+        input1 = input1 - input1_mean
+        input2 = input2 - input2_mean
+
+        input1_l2_norm = torch.norm(input1, p=2, dim=1, keepdim=True).detach()
+        input1_l2 = input1.div(input1_l2_norm.expand_as(input1) + 1e-6)
+        
+        input2_l2_norm = torch.norm(input2, p=2, dim=1, keepdim=True).detach()
+        input2_l2 = input2.div(input2_l2_norm.expand_as(input2) + 1e-6)
+
+
+        euclidean_distance = F.pairwise_distance(input1_l2, input2_l2, keepdim=True)
+
+        input3_mean = torch.mean(input3, dim=0, keepdims=True)
+        input4_mean = torch.mean(input4, dim=0, keepdims=True)
+        input3 = input3 - input3_mean
+        input4 = input4 - input4_mean
+
+        input3_l2_norm = torch.norm(input3, p=2, dim=1, keepdim=True).detach()
+        input3_l2 = input3.div(input3_l2_norm.expand_as(input3) + 1e-6)
+        
+        input4_l2_norm = torch.norm(input4, p=2, dim=1, keepdim=True).detach()
+        input4_l2 = input4.div(input4_l2_norm.expand_as(input4) + 1e-6)
+
+
+        euclidean_distance1 = F.pairwise_distance(input3_l2, input4_l2, keepdim=True)
+
+        diff_loss = torch.mean(torch.pow(euclidean_distance, 2) + torch.pow(torch.clamp(2.0 - euclidean_distance1, min=0.0), 2))
+
+
+        #aaa = torch.mm(input1_l2, input2_l2.T) 
+        #ii_cl_lables = torch.arange(8)
+        #diff_loss = self.critertion(aaa, ii_cl_lables) 
+
+        #diff_loss = torch.mean((input1_l2.t().mm(input2_l2)).pow(2))
+
+        return diff_loss
+
+
 
 class MSE(nn.Module):
     def __init__(self):

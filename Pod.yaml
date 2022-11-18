@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: fuyubo-bertcs-sp-it-dcl-misaway-ourway
+  name: fuyubo-bertcs-sp-it-dcl-ce-nce-cla
 spec:
   restartPolicy: Never
   hostIPC: false

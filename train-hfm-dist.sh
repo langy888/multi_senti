@@ -34,7 +34,7 @@ cla=1
 it=1
 tt=0
 ii=0
-ff=1
+ff=0
 sff=1
 sff_type=avg
 
