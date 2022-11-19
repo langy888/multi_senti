@@ -397,11 +397,11 @@ class CLModel(nn.Module):
             )
 
 
-        self.augment_linear_change = nn.Sequential(
-            nn.Linear(opt.tran_dim, opt.tran_dim),
-            ActivateFun(opt),
-            nn.Linear(opt.tran_dim, opt.tran_dim)
-        )
+        # self.augment_linear_change = nn.Sequential(
+        #     nn.Linear(opt.tran_dim, opt.tran_dim),
+        #     ActivateFun(opt),
+        #     nn.Linear(opt.tran_dim, opt.tran_dim)
+        # )
 
 
     def forward(self, data_orgin: ModelParam, data_augment: ModelParam = None, labels=None, target_labels=None):
@@ -411,10 +411,10 @@ class CLModel(nn.Module):
         output = self.output_classify(orgin_res)
 
         if data_augment:
-            augment_res, _, _ ,_ ,_ , _ ,_, _, _, _, _, _= self.fuse_model(data_augment.texts, data_augment.bert_attention_mask,
-                                                                            data_augment.images, data_augment.text_image_mask,
-                                                                            data_augment.emoji, data_augment.hashtag)
-            augment_res_change = self.augment_linear_change(augment_res)
+            # augment_res, _, _ ,_ ,_ , _ ,_, _, _, _, _, _= self.fuse_model(data_augment.texts, data_augment.bert_attention_mask,
+            #                                                                 data_augment.images, data_augment.text_image_mask,
+            #                                                                 data_augment.emoji, data_augment.hashtag)
+            # augment_res_change = self.augment_linear_change(augment_res)
             orgin_res_change = self.orgin_linear_change(orgin_res)
 
             cla_loss = 0
